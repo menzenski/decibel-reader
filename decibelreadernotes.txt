@@ -1,0 +1,7 @@
+# Notes on the Decibel Reader project
+
+XML output file structure:
+
+* **One single root**: `<data> </data>`
+
+* one entry
