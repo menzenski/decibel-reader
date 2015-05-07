@@ -46,7 +46,7 @@ def new_entry():
     return {"date": entry_date, "time": entry_time, "db": entry_decibels}
 
 def update_json(json_file):
-    """"""
+    """Append a new entry to the current json file."""
     with open(json_file, "r") as j:
         data = json.load(j)
 
