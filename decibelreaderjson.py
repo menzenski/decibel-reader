@@ -1,13 +1,13 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
-#import usb.core
+import usb.core
 import time
 import json
 import os.path
 
 ## initialize
-#dev = usb.core.find(idVendor=0x16c0, idProduct=0x5dc)
+dev = usb.core.find(idVendor=0x16c0, idProduct=0x5dc)
 lastdb = 0
 
 def read_decibels():
@@ -45,7 +45,7 @@ def new_entry():
     return {"date": entry_date, "time": entry_time, "db": entry_decibels}
 
 def update_json(json_file):
-    
+    """"""
     with open(json_file, "r") as j:
         data = json.load(j)
 
@@ -58,5 +58,6 @@ def update_json(json_file):
 if __name__ == "__main__":
     my_title = "fancyjson"
     check_json(my_title)
-    update_json("{}.json".format(my_title))
-    
+    for i in range(1,10):
+        update_json("{}.json".format(my_title))
+        time.sleep(1)
