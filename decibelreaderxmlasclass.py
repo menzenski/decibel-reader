@@ -49,7 +49,7 @@ class XMLSession(object):
         self.xml_entries = self.xml_data.getroot() 
 
     def new_entry(self):
-        """Append a new entry to an open XML file."""
+        """Append a new entry to an open XML file. (With attributes)"""
         self.xml_entry = ET.Element("entry")
         self.xml_entry.attrib["date"] = "{}".format(time.strftime("%Y-%m-%d"))
         self.xml_entry.attrib["time"] = "{}".format(time.strftime("%H:%M:%S"))
@@ -58,12 +58,32 @@ class XMLSession(object):
 
         self.xml_entries.append(self.xml_entry)
 
+    def new_entry_verbose(self):
+        """Append a new entry to an open XML file. (With children elements.)"""
+        self.xml_entry_v = ET.Element("verboseEntry")
+
+        self.entry_date = ET.SubElement(self.xml_entry_v, "date")
+        self.entry_date.text = "{}".format(time.strftime("%Y-%m-%d"))
+        
+        self.entry_time = ET.SubElement(self.xml_entry_v, "time")
+        self.entry_time.text = "{}".format(time.strftime("%H:%M:%S"))
+        
+        self.entry_db = ET.SubElement(self.xml_entry_v, "db")
+        self.entry_db.text = "0"
+        #self.entry_db.text = "{}".format(read_decibels())
+
+        #self.xml_entry_v.append(self.entry_date)
+        #self.xml_entry_v.append(self.entry_time)
+        #self.xml_entry_v.append(self.entry_db)
+
+        self.xml_entries.append(self.xml_entry_v)
+
     def write_xml_to_file(self):
         """Write an XML file to disk."""
         self.xml_data.write(self.xml_filename)
 
 def main():
-    my_title = "xmlclasstest"
+    my_title = "xmlclasstestverbose"
     
     mysession = XMLSession(my_title)
 
@@ -71,7 +91,7 @@ def main():
     mysession.open_xml()
     
     for i in range(1,10):
-        mysession.new_entry()
+        mysession.new_entry_verbose()
         time.sleep(1)
 
     mysession.write_xml_to_file()
