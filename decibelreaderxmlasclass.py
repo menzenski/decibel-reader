@@ -46,7 +46,7 @@ class XMLSession(object):
     def open_xml(self):
         """Open and read an XML file."""
         self.xml_data = ET.parse(self.xml_filename)
-        self.xml_entries = self.xml_data.getroot() 
+        self.xml_entries = self.xml_data.getroot()
 
     def new_entry(self):
         """Append a new entry to an open XML file. (With attributes)"""
@@ -64,10 +64,10 @@ class XMLSession(object):
 
         self.entry_date = ET.SubElement(self.xml_entry_v, "date")
         self.entry_date.text = "{}".format(time.strftime("%Y-%m-%d"))
-        
+
         self.entry_time = ET.SubElement(self.xml_entry_v, "time")
         self.entry_time.text = "{}".format(time.strftime("%H:%M:%S"))
-        
+
         self.entry_db = ET.SubElement(self.xml_entry_v, "db")
         self.entry_db.text = "0"
         #self.entry_db.text = "{}".format(read_decibels())
@@ -84,12 +84,12 @@ class XMLSession(object):
 
 def main():
     my_title = "xmlclasstestverbose"
-    
+
     mysession = XMLSession(my_title)
 
     mysession.check_xml()
     mysession.open_xml()
-    
+
     for i in range(1,10):
         mysession.new_entry_verbose()
         time.sleep(1)
