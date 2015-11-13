@@ -4,12 +4,46 @@
 """Display current decibel readings with a graphical gauge."""
 
 import math
-import time
 import random
+import time
 import Tkinter
+import usb.core
 
 def read_decibels(lower_bound=30, upper_bound=130):
-    return random.randrange(lower_bound, upper_bound)
+    # allow a demo mode in case the decibel meter isn't connected
+    try:
+        # identify the usb device
+        dev = usb.core.find(idVendor=0x16c0, idProduct=0x5dc)
+        # decipher its signal
+        ret = dev.ctrl_transfer(0xC0, 4, 0, 0, 200)
+        db = (ret[0] + ((ret[1] & 3) * 256)) * 0.1 + 30
+        return db
+    except ValueError:
+        return random.randrange(lower_bound, upper_bound)
+    except:
+        print "Unknown error/exception encountered."
+        return random.randrange(lower_bound, upper_bound)
+
+def save_reading(db, time, date, filename='kudecibels', filetype='xml'):
+    """Write the current decibel reading (and a timestamp) to disk."""
+    if filetype.lower() == 'xml':
+        filename = filename + '.xml'
+        message = ("""<?xml version="1.0!?>\n<output>\n\t"""
+            """<decibel-entry time="{}" date="{}">{}</decibel-entry>\n"""
+            """</output>""")
+        with open(filename, 'w+') as output:
+            output.write(message.format(time, date, db))
+    elif filetype.lower() == 'json':
+        filename = filename + '.json'
+        message = (r"""{{
+   "time": "{{{}}}",
+   "date": "{{{}}}",
+   decibels": {{{}}}
+}}""")
+        with open(filename, 'w+') as output:
+            output.write(message.format(time, date, db))
+    else:
+        pass
 
 class ReadoutHeading(object):
     """Displays a description of some measurement."""
@@ -30,7 +64,7 @@ class ReadoutValue(object):
 
     def update(self, db):
         """Update the label with new content."""
-        self.text.set('{}'.format(db))
+        self.text.set('{} dB'.format(db))
 
 class Gauge(object):
 
@@ -75,6 +109,10 @@ class Gauge(object):
         self.label_current = []
         self.label_average = []
         self.label_maximum = []
+        # live decibel tracking won't happen while self.event is None
+        self.event = None
+        # delay between readings, in miliseconds
+        self.delay = 1000
 
     def draw_gauge(self, title="Live Decibel Reading", unit="dB"):
         """Draw the gauge itself."""
@@ -159,10 +197,15 @@ class Gauge(object):
     def db_values(self):
         """Parse a new decibel reading."""
         # first add a new entry to the list of all entries
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+        date_now = time.strftime("%Y-%m-%d")
+        time_now = time.strftime("%H:%M:%S %Z")
         self.db_current = read_decibels()
         # and move the needle
         self.draw_needle(self.db_current)
+        # save the decibel reading to disk
+        save_reading(db=self.db_current, time=time_now, date=date_now)
+        # add the current db rating to the list with a timestamp
+        timestamp = '{} {}'.format(date_now, time_now)
         self.all_dbs.append((timestamp, self.db_current))
         # then recalculate the average decibel rating
         self.db_average = sum([e[1] for e in self.all_dbs])/len(self.all_dbs)
@@ -178,9 +221,24 @@ class Gauge(object):
 
         # return self.db_current, self.db_average, self.db_maximum
 
+        if self.event:
+            self.Canvas.after(self.delay, self.db_values)
+
+    def start_live_db_reading(self, ms_between_readings=500):
+        """Start tracking and outputting live decibel readings.
+
+           Parameters
+           ----------
+             ms_between_readings (int) : milliseconds between readings.
+               Default is 30, which yields about 30 readings per second.
+        """
+        self.event = 'something'
+        self.delay = ms_between_readings
+        self.db_values()
+
     def stop_reading(self):
         """Stop tracking decibel input and quit the program."""
-        pass
+        self.event = None
 
 class DecibelReader(Tkinter.Frame):
     """Main widget window."""
@@ -192,12 +250,12 @@ class DecibelReader(Tkinter.Frame):
 
 def main():
     root = Tkinter.Tk()
-    root.geometry('500x700+100+100')
+    root.geometry('500x700+50+50')
     # weight the center column more heavily so that it expands to fill grid
     root.grid_columnconfigure(1, weight=1)
     # app = DecibelReader(root)
     current = ReadoutHeading(root, text='Current Decibel Reading:')
-    current.Label.grid(row=0, column=1, padx=20, pady=20)
+    current.Label.grid(row=0, column=1, padx=10, pady=10)
     g = Gauge(root)
     g.draw_gauge()
     g.Canvas.grid(row=2, column=0, columnspan=3)
@@ -206,30 +264,38 @@ def main():
 
     g.draw_needle(db)
     average = ReadoutHeading(root, text="Today's Average:")
-    average.Label.grid(row=3, column=0, padx=10, pady=10)
+    average.Label.grid(row=3, column=0, padx=10, pady=5)
     maximum = ReadoutHeading(root, text="Today's Maximum:")
-    maximum.Label.grid(row=3, column=2, padx=10, pady=10)
+    maximum.Label.grid(row=3, column=2, padx=10, pady=5)
 
     current_value = ReadoutValue(root, value=db)
     average_value = ReadoutValue(root, value=db, fontsize=44)
     maximum_value = ReadoutValue(root, value=db, fontsize=44)
 
-    current_value.Label.grid(row=1, column=1, pady=10)
-    average_value.Label.grid(row=4, column=0, pady=10)
-    maximum_value.Label.grid(row=4, column=2, pady=10)
+    current_value.Label.grid(row=1, column=1, pady=5)
+    average_value.Label.grid(row=4, column=0, pady=5)
+    maximum_value.Label.grid(row=4, column=2, pady=5)
 
     g.label_current.append(current_value)
     g.label_average.append(average_value)
     g.label_maximum.append(maximum_value)
 
     # buttons
-    close_button = Tkinter.Button(root, text="Stop")
-    close_button.grid(row=5, column=2, padx=10, pady=10)
+    close_button = Tkinter.Button(root, text="Stop",
+        font=('Helvetica', '30'),
+        command=g.stop_reading
+        )
+    close_button.grid(row=5, column=2, padx=10, pady=5)
     demo_button = Tkinter.Button(root, text="Demo",
-        command=g.db_values)
-    demo_button.grid(row=5, column=1, padx=10, pady=10)
-    start_button = Tkinter.Button(root, text="Start")
-    start_button.grid(row=5, column=0, padx=10, pady=10)
+        font=('Helvetica', '30'),
+        command=g.db_values
+        )
+    demo_button.grid(row=5, column=1, padx=10, pady=5)
+    start_button = Tkinter.Button(root, text="Start",
+        font=('Helvetica', '30'),
+        command=g.start_live_db_reading
+        )
+    start_button.grid(row=5, column=0, padx=10, pady=5)
 
     root.mainloop()
 
