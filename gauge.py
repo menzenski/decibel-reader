@@ -17,31 +17,38 @@ def read_decibels(lower_bound=30, upper_bound=130):
         # decipher its signal
         ret = dev.ctrl_transfer(0xC0, 4, 0, 0, 200)
         db = (ret[0] + ((ret[1] & 3) * 256)) * 0.1 + 30
-        return db
+        db_float = float(db)
+        db_string = '{0:.2f}'.format(db_float)
+        return float(db_string)
     except ValueError:
         return random.randrange(lower_bound, upper_bound)
     except:
         print "Unknown error/exception encountered."
         return random.randrange(lower_bound, upper_bound)
 
-def save_reading(db, time, date, filename='kudecibels', filetype='xml'):
-    """Write the current decibel reading (and a timestamp) to disk."""
+def save_reading(db, timestamp, filename='kudecibels', filetype='json'):
+    """Write the current decibel reading (and a timestamp) to disk.
+
+       Parameters
+       ----------
+         db (float) : decibel reading
+         timestamp (int) : Unix timestamp
+         filename (string) : name of the file (not including extension)
+         filetype (string) : extension with which the file will be saved
+           (currently supports only XML and JSON, but others can be added.)
+    """
     if filetype.lower() == 'xml':
         filename = filename + '.xml'
         message = ("""<?xml version="1.0!?>\n<output>\n\t"""
-            """<decibel-entry time="{}" date="{}">{}</decibel-entry>\n"""
+            """<decibel-entry timestamp="{}">{}</decibel-entry>\n"""
             """</output>""")
         with open(filename, 'w+') as output:
-            output.write(message.format(time, date, db))
+            output.write(message.format(timestamp, db))
     elif filetype.lower() == 'json':
         filename = filename + '.json'
-        message = (r"""{{
-   "time": "{{{}}}",
-   "date": "{{{}}}",
-   decibels": {{{}}}
-}}""")
+        message = """[\n   [{}, {}]\n]"""
         with open(filename, 'w+') as output:
-            output.write(message.format(time, date, db))
+            output.write(message.format(timestamp, db))
     else:
         pass
 
@@ -73,7 +80,7 @@ class Gauge(object):
     coef = 0.1 # coefficient representing radius of circle at gauge center
     step_distance = 25 # interval between big ticks on gauge perimeter
 
-    def __init__(self, parent, width=400, height=400, min_db=30, max_db=130):
+    def __init__(self, parent, width=200, height=200, min_db=30, max_db=130):
         """Initialize the gauge widget.
 
            Parameters
@@ -197,16 +204,14 @@ class Gauge(object):
     def db_values(self):
         """Parse a new decibel reading."""
         # first add a new entry to the list of all entries
-        date_now = time.strftime("%Y-%m-%d")
-        time_now = time.strftime("%H:%M:%S %Z")
+        unix_time = int(time.time())
         self.db_current = read_decibels()
         # and move the needle
         self.draw_needle(self.db_current)
         # save the decibel reading to disk
-        save_reading(db=self.db_current, time=time_now, date=date_now)
+        save_reading(db=self.db_current, timestamp=unix_time)
         # add the current db rating to the list with a timestamp
-        timestamp = '{} {}'.format(date_now, time_now)
-        self.all_dbs.append((timestamp, self.db_current))
+        self.all_dbs.append((unix_time, self.db_current))
         # then recalculate the average decibel rating
         self.db_average = sum([e[1] for e in self.all_dbs])/len(self.all_dbs)
         # and the maximum
@@ -219,62 +224,85 @@ class Gauge(object):
         for label in self.label_maximum:
             label.update(self.db_maximum)
 
-        # return self.db_current, self.db_average, self.db_maximum
-
+        # call this function recursively if desired
         if self.event:
             self.Canvas.after(self.delay, self.db_values)
 
-    def start_live_db_reading(self, ms_between_readings=500):
+    def start_live_db_reading(self, ms_between_readings=1000):
         """Start tracking and outputting live decibel readings.
 
            Parameters
            ----------
              ms_between_readings (int) : milliseconds between readings.
-               Default is 30, which yields about 30 readings per second.
+               Default is 1000 (= 1 reading per second)
         """
         self.event = 'something'
         self.delay = ms_between_readings
         self.db_values()
 
-    def stop_reading(self):
+    def stop_reading(self, write_results=True, filename='totalresults'):
         """Stop tracking decibel input and quit the program."""
         self.event = None
+        if write_results == True:
+            try:
+                import json
+                json_output = json.dumps(self.all_dbs, indent=3,
+                    separators=(',', ':'))
+                filename = filename + '.json'
+                with open(filename, 'w+') as stream:
+                    stream.write(json_output)
+            except ImportError as e:
+                # print the error message
+                print "ImportError: {}".format(e)
+                t = '[{}, {}],\n' # template for one reading
+                # convert each entry into a string representation
+                l = [t.format(i[0], i[1]) for i in self.all_dbs]
+                # well-formed json doesn't have a comma after final entry
+                l = ''.join(l)[:-2] + '\n'
+                # join all strings and surround with braces
+                s = '[\n{}]'.format(l)
+                filename = filename + '.json'
+                with open(filename, 'w+') as stream:
+                    stream.write(s)
 
+## class DecibelReader is DEPRECATED and unnecessary.
 class DecibelReader(Tkinter.Frame):
     """Main widget window."""
 
     def __init__(self, parent, title="Decibel Reader"):
+        """Initialize DecibelReader object."""
         Tkinter.Frame.__init__(self, parent, background='white')
         self.parent = parent
         self.parent.title(title)
 
 def main():
     root = Tkinter.Tk()
-    root.geometry('500x700+50+50')
-    # weight the center column more heavily so that it expands to fill grid
+    root.geometry('+30+30')
+    # weight the left two columns more heavily
+    root.grid_columnconfigure(0, weight=1)
     root.grid_columnconfigure(1, weight=1)
     # app = DecibelReader(root)
     current = ReadoutHeading(root, text='Current Decibel Reading:')
-    current.Label.grid(row=0, column=1, padx=10, pady=10)
+    current.Label.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
     g = Gauge(root)
     g.draw_gauge()
-    g.Canvas.grid(row=2, column=0, columnspan=3)
+    g.Canvas.grid(row=2, column=1, columnspan=3, rowspan=3)
 
     db = read_decibels()
 
     g.draw_needle(db)
     average = ReadoutHeading(root, text="Today's Average:")
-    average.Label.grid(row=3, column=0, padx=10, pady=5)
+    average.Label.grid(row=0, column=2, padx=10, pady=5)
     maximum = ReadoutHeading(root, text="Today's Maximum:")
-    maximum.Label.grid(row=3, column=2, padx=10, pady=5)
+    maximum.Label.grid(row=1, column=2, padx=10, pady=5)
 
     current_value = ReadoutValue(root, value=db)
     average_value = ReadoutValue(root, value=db, fontsize=44)
     maximum_value = ReadoutValue(root, value=db, fontsize=44)
 
-    current_value.Label.grid(row=1, column=1, pady=5)
-    average_value.Label.grid(row=4, column=0, pady=5)
-    maximum_value.Label.grid(row=4, column=2, pady=5)
+    current_value.Label.grid(row=1, column=0, pady=5)
+    average_value.Label.grid(row=0, column=3, pady=5)
+    maximum_value.Label.grid(row=1, column=3, pady=5)
 
     g.label_current.append(current_value)
     g.label_average.append(average_value)
@@ -285,17 +313,17 @@ def main():
         font=('Helvetica', '30'),
         command=g.stop_reading
         )
-    close_button.grid(row=5, column=2, padx=10, pady=5)
+    close_button.grid(row=4, column=0, padx=10, pady=5)
     demo_button = Tkinter.Button(root, text="Demo",
         font=('Helvetica', '30'),
         command=g.db_values
         )
-    demo_button.grid(row=5, column=1, padx=10, pady=5)
+    demo_button.grid(row=3, column=0, padx=10, pady=5)
     start_button = Tkinter.Button(root, text="Start",
         font=('Helvetica', '30'),
         command=g.start_live_db_reading
         )
-    start_button.grid(row=5, column=0, padx=10, pady=5)
+    start_button.grid(row=2, column=0, padx=10, pady=5)
 
     root.mainloop()
 
