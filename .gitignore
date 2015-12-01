@@ -1,6 +1,10 @@
+*.py.swp
+
 # output files
 *.xml
 *.json
+2015_11_13/
+2015_12_01/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -73,6 +73,38 @@ class ReadoutValue(object):
         """Update the label with new content."""
         self.text.set('{} dB'.format(db))
 
+class Graph(object):
+
+    def __init__(self, parent, width=200, height=100, min_db=30, max_db=130):
+        """Initialize the Graph widget.
+
+           Parameters
+           ----------
+             parent (Tkinter widget) : the parent object for the graph.
+             ...
+        """
+        self.Canvas = Tkinter.Canvas(parent, width=width, height=height)
+        self.w = width
+        self.h = height
+        self.min_db = float(min_db)
+        self.max_db = float(max_db)
+        self.db_current = min_db
+        self.db_maximum = max_db
+        self.all_dbs = []
+        # affiliated labels
+        self.label_current = []
+        self.label_average = []
+        self.label_maximum = []
+        # live decibel tracking won't happen while self.event is None
+        self.event = None
+        # delay between readings, in milliseconds
+        self.delay = 1000
+
+    def draw_gauge(self, title='Live Decibel Reading', unit='dB'):
+        """Draw the graph itself."""
+        self.Canvas.create_line(0, 0, 0, 100, fill='black')
+        self.Canvas.create_line(0, 100, 200, 100, fill='black')
+
 class Gauge(object):
 
     n_long = 0.85 # long arm of needle (relative to radius of 1.0)
@@ -213,9 +245,7 @@ class Gauge(object):
         # add the current db rating to the list with a timestamp
         self.all_dbs.append((unix_time, self.db_current))
         # then recalculate the average decibel rating
-        temp_average = sum(
-                [e[1] for e in self.all_dbs])/float(len(self.all_dbs))
-        self.db_average = float('{0:.2f}'.format(temp_average))
+        self.db_average = sum([e[1] for e in self.all_dbs])/len(self.all_dbs)
         # and the maximum
         self.db_maximum = max(self.db_current, self.db_maximum)
 
@@ -329,5 +359,14 @@ def main():
 
     root.mainloop()
 
+def main_two():
+    root = Tkinter.Tk()
+    root.geometry('+30+30')
+    gr = Graph(root)
+    gr.draw_gauge()
+    gr.Canvas.grid(row=0, column=0)
+
+    root.mainloop()
+
 if __name__ == '__main__':
-    main()
+    main_two()
