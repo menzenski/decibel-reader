@@ -4,6 +4,7 @@
 """Display current decibel readings with a graphical gauge."""
 
 import math
+import os
 import random
 import time
 import Tkinter
@@ -246,6 +247,18 @@ class Gauge(object):
         """Stop tracking decibel input and quit the program."""
         self.event = None
         if write_results == True:
+
+            file_number_in_use = True
+            idx = 1
+            while file_number_in_use:
+                str_idx = str(idx).rjust(2, '0')
+                fname = "{}_{}".format(filename, str_idx)
+                if os.path.isfile(fname + '.json'):
+                    idx += 1
+                else:
+                    filename = fname
+                    break
+
             try:
                 import json
                 json_output = json.dumps(self.all_dbs, indent=3,
