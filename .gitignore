@@ -8,6 +8,7 @@ decibelreader.py
 decibelreaderjson.py
 decibelreaderxml.py
 decibelreaderxmlasclass.py
+xmltodict.py
 
 # output files
 *.xml
