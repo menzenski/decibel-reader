@@ -4,6 +4,7 @@
 """Display current decibel readings with a graphical gauge."""
 
 import math
+import os
 import random
 import time
 import Tkinter
@@ -102,8 +103,79 @@ class Graph(object):
 
     def draw_gauge(self, title='Live Decibel Reading', unit='dB'):
         """Draw the graph itself."""
-        self.Canvas.create_line(0, 0, 0, 100, fill='black')
-        self.Canvas.create_line(0, 100, 200, 100, fill='black')
+        # self.Canvas.create_line(0, 0, 0, 100, fill='black')
+        # self.Canvas.create_line(0, 100, 200, 100, fill='black')
+        self.Canvas.create_line(5, 5, 5, 95, 195, 95, fill='black')
+
+    def draw_points(self, db_list):
+        self.Canvas.delete('all')
+        self.draw_gauge()
+        inc = float(self.w) / (len(db_list) + 1)
+        # x = 300.0 / (len(self.all_dbs) + 1)
+        # y = db - 135
+        # self.Canvas.create_line(x, y, x, 95, fill='blue')
+
+        for idx, val in enumerate(db_list):
+            x = inc * (idx + 1)
+            y = 130 - val[1]
+            self.Canvas.create_line(x, y, x, 95, fill='blue')
+
+    def db_values(self):
+        """Parse a new decibel reading."""
+        unix_time = int(time.time())
+        self.db_current = read_decibels()
+        # self.draw_point(db=self.db_current)
+        save_reading(db=self.db_current, timestamp=unix_time)
+        self.all_dbs.append((unix_time, self.db_current))
+        self.draw_points(self.all_dbs)
+
+        temp_average = sum(
+            [e[1] for e in self.all_dbs])/float(len(self.all_dbs))
+        self.db_average = float('{0:.2f}'.format(temp_average))
+        self.db_maximum = max(self.db_current, self.db_maximum)
+
+        for label in self.label_current:
+            label.update(self.db_current)
+        for label in self.label_average:
+            label.update(self.db_average)
+        for label in self.label_maximum:
+            label.update(self.db_maximum)
+
+        if self.event:
+            self.Canvas.after(self.delay, self.db_values)
+            # self.Canvas.delete('point')
+            # self.draw_points(self.all_dbs)
+
+    def start_live_db_reading(self, ms_between_readings=1000):
+        self.event = 'something'
+        self.delay = ms_between_readings
+        self.db_values()
+
+    def stop_reading(self, write_results=True, filename='totalresults'):
+        self.event = None
+        if write_results == True:
+
+            file_number_in_use = True
+            idx = 1
+            while file_number_in_use:
+                str_idx = str(idx).rjust(2, '0')
+                fname = "{}_{}".format(filename, str_idx)
+                if os.path.isfile(fname + '.json'):
+                    idx += 1
+                else:
+                    filename = fname
+                    break
+
+            try:
+                import json
+                json_output = json.dumps(self.all_dbs, indent=3,
+                    separators=(',', ':'))
+                filename = filename + '.json'
+                with open(filename, 'w+') as stream:
+                    stream.write(json_output)
+            except ImportError as e:
+                print "Install json package!"
+
 
 class Gauge(object):
 
@@ -316,13 +388,13 @@ def main():
     # app = DecibelReader(root)
     current = ReadoutHeading(root, text='Current Decibel Reading:')
     current.Label.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
-    g = Gauge(root)
+    g = Graph(root)
     g.draw_gauge()
     g.Canvas.grid(row=2, column=1, columnspan=3, rowspan=3)
 
     db = read_decibels()
 
-    g.draw_needle(db)
+    # g.draw_point(db)
     average = ReadoutHeading(root, text="Today's Average:")
     average.Label.grid(row=0, column=2, padx=10, pady=5)
     maximum = ReadoutHeading(root, text="Today's Maximum:")
@@ -369,4 +441,4 @@ def main_two():
     root.mainloop()
 
 if __name__ == '__main__':
-    main_two()
+    main()
