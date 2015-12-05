@@ -7,7 +7,7 @@ ftpconfig.py
 decibelreader.py
 decibelreaderjson.py
 decibelreaderxml.py
-decxbelreaderxmlasclass.py
+decibelreaderxmlasclass.py
 
 # output files
 *.xml
