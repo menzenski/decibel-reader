@@ -1,5 +1,11 @@
 *.py.swp
 
+# older files
+decibelreader.py
+decibelreaderjson.py
+decibelreaderxml.py
+decxbelreaderxmlasclass.py
+
 # output files
 *.xml
 *.json
