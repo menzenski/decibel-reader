@@ -1,5 +1,8 @@
 *.py.swp
 
+# FTP configuration file (with account information)
+ftpconfig.py
+
 # older files
 decibelreader.py
 decibelreaderjson.py
