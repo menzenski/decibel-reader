@@ -3,6 +3,7 @@
 
 """Display current decibel readings with a graphical gauge."""
 
+import json
 import math
 import os
 import random
@@ -112,6 +113,46 @@ class DecibelVisualizer(object):
             0:  '#040AB4',
         }
 
+        # set up the labels and headings
+        self.cur_heading = ReadoutHeading(parent,
+                                          text="Current Decibel Reading:")
+        self.cur_value = ReadoutValue(parent, value=min_db)
+
+        self.avg_heading = ReadoutHeading(parent, text="Today's Average:")
+        self.avg_value = ReadoutValue(parent, value=min_db, fontsize=44)
+
+        self.max_heading = ReadoutHeading(parent, text="Today's Maximum:")
+        self.max_value = ReadoutValue(parent, value=min_db, fontsize=44)
+
+        # buttons
+        self.close_button = Tkinter.Button(
+                parent, text='Stop', font=('Helvetica', '30'),
+                command=self.stop_reading)
+        self.demo_button = Tkinter.Button(
+                parent, text='Demo', font=('Helvetica', '30'),
+                command=self.db_values)
+        self.start_button = Tkinter.Button(
+                parent, text='Start', font=('Helvetica', '30'),
+                command=self.start_live_db_reading)
+
+        # configure the parent widget's grid
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_columnconfigure(1, weight=1)
+        # add widgets to the parent widget's grid
+        self.Canvas.grid(row=2, column=1, columnspan=3, rowspan=3)
+        self.cur_heading.Label.grid(row=0, column=0, columnspan=2, padx=10,
+                                    pady=10)
+        self.cur_value.Label.grid(row=1, column=0, pady=5)
+
+        self.avg_heading.Label.grid(row=0, column=2, padx=10, pady=5)
+        self.avg_value.Label.grid(row=0, column=3, pady=5)
+
+        self.max_heading.Label.grid(row=1, column=2, padx=10, pady=5)
+        self.max_value.Label.grid(row=1, column=3, pady=5)
+        self.close_button.grid(row=4, column=0, padx=10, pady=5)
+        self.demo_button.grid(row=3, column=0, padx=10, pady=5)
+        self.start_button.grid(row=2, column=0, padx=10, pady=5)
+
     def draw_frame(self, title="Live Decibel Reading", unit='dB'):
         """Draw the frame and labels."""
         x1, y1 = 10, 10
@@ -122,7 +163,7 @@ class DecibelVisualizer(object):
     def draw_one_bar(self, bar_height=130, bar_width=20, left_edge=20):
         """Draw a single bar (for testing purposes)."""
         inc_height = 0
-        for tot in range(0, 14):
+        for tot in range(0, bar_height / 10 + 1):
             # bin_height = min([10, bar_height - ((bar_height / 10) * 10)])
             dif = bar_height - (tot * 10)
             bin_height = min([dif, 10])
@@ -144,24 +185,106 @@ class DecibelVisualizer(object):
         for h, e in list_of_height_edge_tuples:
                 self.draw_one_bar(bar_height=h, left_edge=e)
 
+    def draw_identical_bars(self, bar_height):
+        self.draw_multiple_bars(
+            [(bar_height, e) for e in [20+i*30 for i in range(0,10)]])
+
+    def db_values(self):
+        """Parse a new decibel reading."""
+        unix_time = int(time.time())
+        self.db_current = read_decibels()
+        save_reading(db=self.db_current, timestamp=unix_time)
+        self.all_dbs.append((unix_time, self.db_current))
+        self.clear()
+        self.draw_identical_bars(self.db_current)
+
+        temp_average = sum(
+            [e[1] for e in self.all_dbs]) / float(len(self.all_dbs))
+        self.db_average = float('{0:.2f}'.format(temp_average))
+        self.db_maximum = max(self.db_current, self.db_maximum)
+
+        self.cur_value.update(self.db_current)
+        self.avg_value.update(self.db_average)
+        self.max_value.update(self.db_maximum)
+
+        # call this function recursively if desired
+        if self.event:
+            self.Canvas.after(self.delay, self.db_values)
+
+    def db_values_smoothed(self, subintervals=10):
+        """Parse a new decibel reading and smooth the visualization."""
+        unix_time = int(time.time())
+        self.db_current = read_decibels()
+        save_reading(db=self.db_current, timestamp=unix_time)
+        self.all_dbs.append((unix_time, self.db_curent))
+        if len(self.all_dbs) >= 2:
+            db_prev = self.all_dbs[-2][1]
+            db_now = self.all_dbs[-1][1]
+            db_int = db_now - db_prev
+            db_inc = db_int / float(subinterval)
+            # smooth the visualization display
+            for i in range(0, subintervals):
+                self.clear()
+                h = db_prev + (i * db_inc)
+                self.draw_identical_bars(bar_height=h)
+
+            # update labels
+            temp_average = sum(
+                [e[1] for e in self.all_dbs]) / float(len(self.all_dbs))
+            self.db_average = float('{0:.2f}'.format(temp_average))
+            self.db_maximum = max(self.db_current, self.db_maximum)
+            self.cur_value.update(self.db_current)
+            self.avg_value.update(self.db_average)
+            self.max_value.update(self.db_maximum)
+
+        else:
+            pass
+
+        # call this function recursively if desired
+        if self.event:
+            self.Canvas.after(self.delay, self.db_values)
+
+    def start_live_db_reading(self, ms_between_readings=None):
+        """Start live tracking and outputting of decibel readings."""
+        if ms_between_readings is None:
+            ms_between_readings = self.delay
+        self.event = 'something'
+        self.db_values()
+
+    def clear(self):
+        """Remove existing bars from the visualizer"""
+        self.Canvas.delete('all')
+        self.draw_frame()
+
+    def stop_reading(self, write_results=True, filename='totalresults'):
+        """Stop tracking decibel input."""
+        self.event = None
+        if write_results == True:
+            file_number_in_use = True
+            idx = 1
+            while file_number_in_use:
+                str_idx = str(idx).rjust(2, '0')
+                fname = '{}_{}'.format(filename, str_idx)
+                if os.path.isfile(fname + '.json'):
+                    idx += 1
+                else:
+                    filename = fname
+                    break
+
+            json_output = json.dumps(self.all_dbs, indent=3,
+                                     separators=(',', ':'))
+            filename = filename + '.json'
+            with open(filename, 'w+') as stream:
+                stream.write(json_output)
+
 def main():
     root = Tkinter.Tk()
-    root.geometry('+30+30')
-    # weight the left two columns more heavily
-    root.grid_columnconfigure(0, weight=1)
-    root.grid_columnconfigure(1, weight=1)
-    # app = DecibelReader(root)
-    current = ReadoutHeading(root, text='Current Decibel Reading:')
-    current.Label.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+    root.geometry('550x330+30+30')
     g = DecibelVisualizer(root)
     g.draw_frame()
-    g.Canvas.grid(row=2, column=1, columnspan=3, rowspan=3)
-
-    #g.draw_one_bar()
-
     g.draw_multiple_bars(
-        [(105, 20), (106, 50), (107, 80), (108, 110), (109, 140),
-         (110, 170), (111, 200), (112, 230), (113, 260), (114, 290)]
+        [(105, 20), (115, 50), (125, 80), (121, 110), (120, 140),
+         (119, 170), (118, 200), (115, 230), (112, 260), (108, 290)]
         )
 
     root.mainloop()
