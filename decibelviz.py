@@ -123,7 +123,9 @@ class DecibelVisualizer(object):
         """Draw a single bar (for testing purposes)."""
         inc_height = 0
         for tot in range(0, 14):
-            bin_height = min([10, bar_height - ((bar_height / 10) * 10)])
+            # bin_height = min([10, bar_height - ((bar_height / 10) * 10)])
+            dif = bar_height - (tot * 10)
+            bin_height = min([dif, 10])
             col = self.colors[tot]
             x1, y1 = left_edge, self.max_scale - ((tot * 10) + bin_height)
             x2, y2 = left_edge + bar_width, self.max_scale - (tot * 10)
@@ -133,7 +135,7 @@ class DecibelVisualizer(object):
             #           x1, x2, y1, y2, col, tot, inc_height, bar_height)
 
             inc_height += bin_height
-            if inc_height >= bar_height:
+            if inc_height > bar_height:
                 break
 
             self.Canvas.create_rectangle(x1, y1, x2, y2, fill=col)
