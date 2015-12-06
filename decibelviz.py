@@ -77,7 +77,7 @@ class ReadoutValue(object):
 class DecibelVisualizer(object):
     """Cool-looking way to visualize decibel levels."""
 
-    def __init__(self, parent, width=300, height=150, min_db=30, max_db=130,
+    def __init__(self, parent, width=320, height=150, min_db=30, max_db=130,
                  delay=1000):
         """Initialize the DecibelVizualizer widget."""
         self.Canvas = Tkinter.Canvas(parent, width=width, height=height)
@@ -116,29 +116,31 @@ class DecibelVisualizer(object):
         """Draw the frame and labels."""
         x1, y1 = 10, 10
         x2, y2 = 10, self.max_scale
-        x3, y3 = 200, self.max_scale
+        x3, y3 = self.w, self.max_scale
         self.Canvas.create_line(x1, y1, x2, y2, x3, y3, fill='black')
 
-    def draw_one_bar(self, bar_height=125, bar_width=10, left_edge=20):
+    def draw_one_bar(self, bar_height=130, bar_width=20, left_edge=20):
         """Draw a single bar (for testing purposes)."""
-        # more_height = True
-        top_height = bar_height - ((bar_height / 10) * 10)
-        # while more_height:
-        bins = (bar_height / 10) + 1
-        for _ in range(0, bins):
-            b = bar_height / 10
-            b_height = 10 if ((10 * b) + 10) < bar_height else top_height
-            print 'b: {}\tb_height: {}'.format(b, b_height)
-            if self.colors[b] >= 0:
-                col = self.colors[b]
-                x1, y1 = left_edge, b + b_height
-                x2, y2 = left_edge + bar_width, b
-                self.Canvas.create_rectangle(x1, y1, x2, y2, fill=col)
-                bar_height = ((bar_height / 10) * 10) - 1
-                if bar_height <= 0:
-                    break
-            else:
+        inc_height = 0
+        for tot in range(0, 14):
+            bin_height = min([10, bar_height - ((bar_height / 10) * 10)])
+            col = self.colors[tot]
+            x1, y1 = left_edge, self.max_scale - ((tot * 10) + bin_height)
+            x2, y2 = left_edge + bar_width, self.max_scale - (tot * 10)
+
+            # print 'x1: {}, x2: {}, y1: {}, y2: {}, col: {}, tot:{}, ' \
+            #       'inc_height: {}, bar_height: {}'.format(
+            #           x1, x2, y1, y2, col, tot, inc_height, bar_height)
+
+            inc_height += bin_height
+            if inc_height >= bar_height:
                 break
+
+            self.Canvas.create_rectangle(x1, y1, x2, y2, fill=col)
+
+    def draw_multiple_bars(self, list_of_height_edge_tuples):
+        for h, e in list_of_height_edge_tuples:
+                self.draw_one_bar(bar_height=h, left_edge=e)
 
 def main():
     root = Tkinter.Tk()
@@ -153,7 +155,12 @@ def main():
     g.draw_frame()
     g.Canvas.grid(row=2, column=1, columnspan=3, rowspan=3)
 
-    g.draw_one_bar()
+    #g.draw_one_bar()
+
+    g.draw_multiple_bars(
+        [(105, 20), (106, 50), (107, 80), (108, 110), (109, 140),
+         (110, 170), (111, 200), (112, 230), (113, 260), (114, 290)]
+        )
 
     root.mainloop()
 
