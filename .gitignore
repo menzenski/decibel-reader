@@ -9,6 +9,11 @@ decibelreaderjson.py
 decibelreaderxml.py
 decibelreaderxmlasclass.py
 xmltodict.py
+viztest.py
+
+# testing files
+decibeltest.txt
+colors.txt
 
 # output files
 *.xml
