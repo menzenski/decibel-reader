@@ -79,7 +79,7 @@ class DecibelVisualizer(object):
     """Cool-looking way to visualize decibel levels."""
 
     def __init__(self, parent, width=320, height=150, min_db=30, max_db=130,
-                 delay=1000):
+                 delay=500, subintervals=10):
         """Initialize the DecibelVizualizer widget."""
         self.Canvas = Tkinter.Canvas(parent, width=width, height=height)
         self.w = width
@@ -93,8 +93,10 @@ class DecibelVisualizer(object):
         self.all_dbs = []
         # live decibel tracking won't happen while self.event is None
         self.event = None
-        # delay between readings, in milliseconds
+        # delay between readings of the USB device, in milliseconds
         self.delay = delay
+        # number of times per second that the visualization will refresh
+        self.subintervals = subintervals
 
         self.colors = {
             13: '#E50000',
@@ -113,6 +115,10 @@ class DecibelVisualizer(object):
             0:  '#040AB4',
         }
 
+        # counters
+        self.counter = 0
+        self.subcounter = 0
+
         # set up the labels and headings
         self.cur_heading = ReadoutHeading(parent,
                                           text="Current Decibel Reading:")
@@ -130,7 +136,7 @@ class DecibelVisualizer(object):
                 command=self.stop_reading)
         self.demo_button = Tkinter.Button(
                 parent, text='Demo', font=('Helvetica', '30'),
-                command=self.db_values)
+                command=self.live_display)
         self.start_button = Tkinter.Button(
                 parent, text='Start', font=('Helvetica', '30'),
                 command=self.start_live_db_reading)
@@ -153,6 +159,25 @@ class DecibelVisualizer(object):
         self.demo_button.grid(row=3, column=0, padx=10, pady=5)
         self.start_button.grid(row=2, column=0, padx=10, pady=5)
 
+    def live_dbs(self, lower_bound=30, upper_bound=130):
+        """Return the live decibel reading from the USB device."""
+        try:
+            # identify the usb device
+            dev = usb.core.find(idVendor=0x16c0, idProduct=0x5dc)
+            # decipher its signal
+            ret = dev.ctrl_transfer(0xC0, 4, 0, 0, 200)
+            db = (ret[0] + ((ret[1] & 3) * 256)) * 0.1 + 30
+            db_as_string = '{0:.2f}'.format(float(db))
+            return float(db_as_string)
+        # allow a demo mode in case the demo mode isn't connected.
+        except ValueError:
+            return float('{0:.2f}'.format(
+                    float(random.randrange(lower_bound, upper_bound))))
+        except Exception as e:
+            print "Unknown exception: {}".format(e)
+            return float('{0:.2f}'.format(
+                    float(random.randrange(lower_bound, upper_bound))))
+
     def draw_frame(self, title="Live Decibel Reading", unit='dB'):
         """Draw the frame and labels."""
         x1, y1 = 10, 10
@@ -163,7 +188,7 @@ class DecibelVisualizer(object):
     def draw_one_bar(self, bar_height=130, bar_width=20, left_edge=20):
         """Draw a single bar (for testing purposes)."""
         inc_height = 0
-        for tot in range(0, bar_height / 10 + 1):
+        for tot in range(0, int(bar_height) / 10 + 1):
             # bin_height = min([10, bar_height - ((bar_height / 10) * 10)])
             dif = bar_height - (tot * 10)
             bin_height = min([dif, 10])
@@ -189,44 +214,104 @@ class DecibelVisualizer(object):
         self.draw_multiple_bars(
             [(bar_height, e) for e in [20+i*30 for i in range(0,10)]])
 
-    def db_values(self):
-        """Parse a new decibel reading."""
-        unix_time = int(time.time())
-        self.db_current = read_decibels()
-        save_reading(db=self.db_current, timestamp=unix_time)
-        self.all_dbs.append((unix_time, self.db_current))
-        self.clear()
-        self.draw_identical_bars(self.db_current)
+    def draw_interpolated_individual_bars(self, subcounter=None):
+        if subcounter is None:
+            subcounter = self.subcounter
+        tup_list = [(self.all_dbs[i][1], self.all_dbs[i+1][1])
+                    for i in range(len(self.all_dbs) - 1)]
+        int_list = []
+        for a, b in tup_list:
+            vals = self.interpolate_two_values(a, b)
+            int_list += vals
+        # number of bars
+        num = 10
+        self.draw_multiple_bars(
+            [(v, e) for (v, e) in zip(
+                int_list[-(num + subcounter):],
+                [20+i*30 for i in range(0, 10)])])
 
+    def interpolate_two_values(self, val_a, val_b, subintervals=None):
+        """Return a list of values between two values"""
+        if subintervals is None:
+            subintervals = self.subintervals
+        interval = val_b - val_a
+        increment = interval / float(subintervals)
+        return [val_a + (increment * s) for s in range(0, subintervals)]
+
+    def live_display(self, subintervals=None):
+        """Monitor live decibel readings and plot with smoothness."""
+        # if counter % subintervals == 0
+        # then fetch a new data point
+        # else interpolate the last two
+        # TODO: make sure this SAVES the db readings as they happen
+        if subintervals is None:
+            subintervals = self.subintervals
+        delay = self.delay / subintervals
+        unix_time = int(time.time())
+        if len(self.all_dbs) >= 2:
+            # heights = self.interpolate_two_values(
+            #         val_a=self.all_dbs[-2][1],
+            #         val_b=self.all_dbs[-1][1],
+            #         subintervals=subintervals)
+
+            self.subcounter = self.counter % subintervals
+
+            self.clear()
+            # self.draw_identical_bars(bar_height=heights[subcounter])
+            self.draw_interpolated_individual_bars()
+
+            if self.subcounter == 0:
+                self.all_dbs.append((unix_time, self.live_dbs()))
+                self.update_stats()
+                self.counter += 1
+            else:
+                self.counter += 1
+        else:
+            self.all_dbs.append((unix_time, self.live_dbs()))
+            self.update_stats()
+            self.counter += 1
+        # call this function recursively, if desired
+        if self.event:
+            self.Canvas.after(delay, self.live_display)
+
+    def update_stats(self):
+        """Update labels with new information."""
+        self.db_current = self.all_dbs[-1][1]
         temp_average = sum(
             [e[1] for e in self.all_dbs]) / float(len(self.all_dbs))
         self.db_average = float('{0:.2f}'.format(temp_average))
         self.db_maximum = max(self.db_current, self.db_maximum)
-
         self.cur_value.update(self.db_current)
         self.avg_value.update(self.db_average)
         self.max_value.update(self.db_maximum)
 
-        # call this function recursively if desired
-        if self.event:
-            self.Canvas.after(self.delay, self.db_values)
-
-    def db_values_smoothed(self, subintervals=10):
+    def db_values(self, subintervals=None):
         """Parse a new decibel reading and smooth the visualization."""
+        if subintervals is None:
+            subintervals = self.subintervals
         unix_time = int(time.time())
-        self.db_current = read_decibels()
+        self.db_current = self.live_dbs()
         save_reading(db=self.db_current, timestamp=unix_time)
-        self.all_dbs.append((unix_time, self.db_curent))
+        self.all_dbs.append((unix_time, self.db_current))
+        print "before if loop"
         if len(self.all_dbs) >= 2:
+            print "in if loop"
             db_prev = self.all_dbs[-2][1]
             db_now = self.all_dbs[-1][1]
             db_int = db_now - db_prev
-            db_inc = db_int / float(subinterval)
+            db_inc = db_int / float(subintervals)
+            print "db_prev: {}, db_now: {}, db_int: {}, db_inc: {}" \
+                    "".format(
+                    db_prev, db_now, db_int, db_inc)
             # smooth the visualization display
             for i in range(0, subintervals):
-                self.clear()
                 h = db_prev + (i * db_inc)
+                print 'i: {}, h: {}, p: {}'.format(i, h, db_prev+(i*db_inc))
                 self.draw_identical_bars(bar_height=h)
+                d = self.delay / subintervals
+                self.clear()
+                self.draw_identical_bars(h)
+                self.Canvas.after(d, self.draw_identical_bars, h)
 
             # update labels
             temp_average = sum(
@@ -238,18 +323,21 @@ class DecibelVisualizer(object):
             self.max_value.update(self.db_maximum)
 
         else:
+            print "in else block"
             pass
 
         # call this function recursively if desired
         if self.event:
-            self.Canvas.after(self.delay, self.db_values)
+            print "in recursive block!"
+            self.Canvas.after(0, self.db_values)
 
     def start_live_db_reading(self, ms_between_readings=None):
         """Start live tracking and outputting of decibel readings."""
         if ms_between_readings is None:
             ms_between_readings = self.delay
         self.event = 'something'
-        self.db_values()
+        # self.db_values()
+        self.live_display()
 
     def clear(self):
         """Remove existing bars from the visualizer"""
