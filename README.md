@@ -9,7 +9,7 @@ a live stat in the team's official app and on the team's official web site.
 
 The current iteration of the decibel reader widget looks like this:
 
-![dB reader screenshot](img/decibelviz.png "Screenshot of the decibel reader")
+![dB reader screenshot](img/decibelviz.gif "Screenshot of the decibel reader")
 
 The longer-term goal is to use the data from this reader to trigger some sort
 of alert (perhaps a push notification in the app) when the sound level in the
