@@ -11,4 +11,15 @@ The current iteration of the decibel reader widget looks like this:
 
 ![dB reader screenshot](img/decibelviz.png "Screenshot of the decibel reader")
 
+The longer-term goal is to use the data from this reader to trigger some sort
+of alert (perhaps a push notification in the app) when the sound level in the
+arena exceeds some as-yet-undetermined threshold, or remains above some
+threshold for some as-yet-undetermined length of time, so that fans would know
+that the game's getting exciting, or so that highlight moments might be chosen
+automatically. It's still unclear how this might be accomplished.
 
+## Notes
+
+This script is run during games on a Windows XP netbook, so care has been
+taken to ensure that it uses only code present in the standard library in
+Python 2.7.9.
