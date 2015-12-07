@@ -18,6 +18,11 @@ threshold for some as-yet-undetermined length of time, so that fans would know
 that the game's getting exciting, or so that highlight moments might be chosen
 automatically. It's still unclear how this might be accomplished.
 
+## Hardware
+
+This script was written for a **Wensn WS1361 Digital Sound Level Meter**
+with a range of 30 to 130 dB.
+
 ## Notes
 
 This script is run during games on a Windows XP netbook, so care has been
