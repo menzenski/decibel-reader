@@ -3,6 +3,7 @@
 
 """Display current decibel readings with a graphical gauge."""
 
+import ftplib
 import json
 import math
 import os
@@ -10,6 +11,15 @@ import random
 import time
 import Tkinter
 import usb.core
+
+from ftpconfig import FTP_URL, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
+
+def fibonacci_number(n):
+    """Return the Nth Fibonacci number."""
+    a, b = 1, 1
+    for _ in range(n - 1):
+        a, b = b, a + b
+    return a
 
 def save_reading(db, timestamp, filename='kudecibels', filetype='json'):
     """Write the current decibel reading (and a timestamp) to disk.
@@ -83,7 +93,8 @@ class DecibelVisualizer(object):
 
     def __init__(self, parent, width=320, height=150, min_db=30, max_db=130,
                  delay=500, subintervals=10, title="Live Decibel Reading",
-                 units='dB'):
+                 units='dB', use_ftp=False, ftp_url='', ftp_username='',
+                 ftp_password='', ftp_dir=''):
         """Initialize the DecibelVizualizer widget.
 
            Parameters
@@ -98,6 +109,13 @@ class DecibelVisualizer(object):
                per second)
              subintervals (int) : number of times per second that the
                visualization will be refreshed
+             title (str) : title displayed at the top of the main window
+             units (str) : units of measurement for the meter readings
+             use_ftp (boolean) : should readings be sent to FTP server?
+             ftp_url (str) : hostname for FTP server
+             ftp_username (str) : username for FTP server
+             ftp_password (str) : password for FTP server
+             ftp_dir (str) : path to desired directory on FTP server
         """
         self.parent = parent
         self.parent.wm_title(title)
@@ -117,6 +135,17 @@ class DecibelVisualizer(object):
         self.delay = delay
         # number of times per second that the visualization will refresh
         self.subintervals = subintervals
+
+        # ftp login credentials
+        self.use_ftp = use_ftp
+        self.ftp_url = ftp_url
+        self.ftp_username = ftp_username
+        self.ftp_password = ftp_password
+        self.ftp_dir = ftp_dir
+
+        if self.use_ftp == True:
+            self._open_ftp_connection(self.ftp_url, self.username,
+                                      self.ftp_password, self.ftp_dir)
 
         self.colors = {
             13: '#E50000',
@@ -138,6 +167,7 @@ class DecibelVisualizer(object):
         # counters
         self.counter = 0
         self.subcounter = 0
+        self.fibcounter = 1
 
         # set up the labels and headings
         self.cur_heading = ReadoutHeading(parent,
@@ -178,6 +208,31 @@ class DecibelVisualizer(object):
         self.close_button.grid(row=4, column=0, padx=10, pady=5)
         self.demo_button.grid(row=3, column=0, padx=10, pady=5)
         self.start_button.grid(row=2, column=0, padx=10, pady=5)
+
+    def _open_ftp_connection(self, host, username, password, directory):
+        """Establish a new connection to the FTP server.
+
+           Parameters
+           ----------
+             host (str) : hostname for FTP server
+             username (str) : username for FTP server
+             password (str) : password for the FTP server
+             directory (str) : path to desired directory on FTP server
+        """
+        try:
+            self.ftp = ftplib.FTP(host=host, user=username, passwd=password)
+            self.ftp.cwd(directory)
+        except Exception as e:
+            print 'Exception: {}'.format(e)
+            self.use_ftp = False
+
+    def _close_ftp_connection(self):
+        """Close the FTP connection."""
+        try:
+            self.ftp.quit()
+        # if there's no connection to close, don't do anything
+        except AttributeError as e:
+            pass
 
     def live_dbs(self, lower_bound=None, upper_bound=None):
         """Return the live decibel reading from the USB device.
@@ -379,6 +434,7 @@ class DecibelVisualizer(object):
     def stop_reading(self, write_results=True, filename='totalresults'):
         """Stop tracking decibel input and save all results."""
         self.event = None
+        self._close_ftp_connection()
         if write_results == True:
             file_number_in_use = True
             idx = 1
