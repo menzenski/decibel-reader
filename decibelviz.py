@@ -259,11 +259,13 @@ class DecibelVisualizer(object):
                 cmd = ftp.send_file(filename=fname)
             # confirm successful upload and delete temp file
             if cmd == '226 Transfer complete.':
-                print 'Successful upload! {}'.formad(cmd)
+                print 'Successful upload! {}'.format(cmd)
                 self.temp_dbs = []
                 self.fibcounter = 1
                 self.ftpcounter = 0
         # if we get an error, keep trying
+        except AttributeError as e:
+            print "AttributeError: {}".format(e)
         except:
             print 'Unexpected error: {}'.format(sys.exc_info()[0])
             wait = (standard_wait + fibonacci_number(self.fibcounter)) * 1000
