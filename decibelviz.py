@@ -11,23 +11,6 @@ import time
 import Tkinter
 import usb.core
 
-def read_decibels(lower_bound=30, upper_bound=130):
-    # allow a demo mode in case the decibel meter isn't connected
-    try:
-        # identify the usb device
-        dev = usb.core.find(idVendor=0x16c0, idProduct=0x5dc)
-        # decipher its signal
-        ret = dev.ctrl_transfer(0xC0, 4, 0, 0, 200)
-        db = (ret[0] + ((ret[1] & 3) * 256)) * 0.1 + 30
-        db_float = float(db)
-        db_string = '{0:.2f}'.format(db_float)
-        return float(db_string)
-    except ValueError:
-        return random.randrange(lower_bound, upper_bound)
-    except:
-        print "Unknown error/exception encountered."
-        return random.randrange(lower_bound, upper_bound)
-
 def save_reading(db, timestamp, filename='kudecibels', filetype='json'):
     """Write the current decibel reading (and a timestamp) to disk.
 
@@ -41,7 +24,7 @@ def save_reading(db, timestamp, filename='kudecibels', filetype='json'):
     """
     if filetype.lower() == 'xml':
         filename = filename + '.xml'
-        message = ("""<?xml version="1.0!?>\n<output>\n\t"""
+        message = ("""<?xml version="1.0"?>\n<output>\n\t"""
             """<decibel-entry timestamp="{}">{}</decibel-entry>\n"""
             """</output>""")
         with open(filename, 'w+') as output:
@@ -55,32 +38,69 @@ def save_reading(db, timestamp, filename='kudecibels', filetype='json'):
         pass
 
 class ReadoutHeading(object):
-    """Displays a description of some measurement."""
+    """Display a description of some measurement."""
 
     def __init__(self, parent, text):
-        """Initialize the ReadoutHeading object."""
+        """Initialize the ReadoutHeading object.
+
+           Parameters
+           ----------
+             parent (Tkinter widget) : the parent widget
+             text (str) : text for the label
+        """
         self.Label = Tkinter.Label(parent, text=text)
 
 class ReadoutValue(object):
     """Display a measurement in units."""
 
     def __init__(self, parent, value, fontsize=60, units='dB'):
-        """Initialize the ReadoutValue object."""
+        """Initialize the ReadoutValue object.
+
+           Parameters
+           ----------
+             parent (Tkinter widget) : the parent widget
+             value (str) : starting text for the label
+             fontsize (int) : font size for the label
+             units (str) : units of measurement for the value displayed
+        """
         self.text = Tkinter.StringVar()
         self.Label = Tkinter.Label(parent, textvariable=self.text,
             font=('Helvetica', '{}'.format(fontsize)))
+        self.units = units
         self.update(value)
 
     def update(self, db):
-        """Update the label with new content."""
-        self.text.set('{} dB'.format(db))
+        """Update the label with new content.
+
+           Parameters
+           ----------
+             db (float, int) : decibel value
+        """
+        self.text.set('{} {}'.format(db, self.units))
 
 class DecibelVisualizer(object):
     """Cool-looking way to visualize decibel levels."""
 
     def __init__(self, parent, width=320, height=150, min_db=30, max_db=130,
-                 delay=500, subintervals=10):
-        """Initialize the DecibelVizualizer widget."""
+                 delay=500, subintervals=10, title="Live Decibel Reading",
+                 units='dB'):
+        """Initialize the DecibelVizualizer widget.
+
+           Parameters
+           ----------
+             parent (Tkinter widget) : the parent widget
+             width (int) : width of the visualization in pixels
+             height (int) : height of the visualization in pixels
+             min_db (int) : minimum decibel level of the USB sound meter
+             max_db (int) : maximum decibel level of the USB sound meter
+             delay (int) : refresh rate of the USB sound level meter in
+               milliseconds (i.e, delay=500 means a refreshed rate of 2x
+               per second)
+             subintervals (int) : number of times per second that the
+               visualization will be refreshed
+        """
+        self.parent = parent
+        self.parent.wm_title(title)
         self.Canvas = Tkinter.Canvas(parent, width=width, height=height)
         self.w = width
         self.h = height
@@ -159,8 +179,25 @@ class DecibelVisualizer(object):
         self.demo_button.grid(row=3, column=0, padx=10, pady=5)
         self.start_button.grid(row=2, column=0, padx=10, pady=5)
 
-    def live_dbs(self, lower_bound=30, upper_bound=130):
-        """Return the live decibel reading from the USB device."""
+    def live_dbs(self, lower_bound=None, upper_bound=None):
+        """Return the live decibel reading from the USB device.
+
+           Parameters
+           ----------
+             lower_bound (int) : minimum decibel reading
+             upper_bound (int) : maximum decibel reading
+
+           Returns
+           -------
+             (float) : current decibel reading, either the actual
+               reading from the connected USB device, or a random
+               reading which may approximate it for testing purposes.
+               The returned reading is rounded to two decimal places.
+        """
+        if lower_bound is None:
+            lower_bound = self.min_db
+        if upper_bound is None:
+            upper_bound = self.max_db
         try:
             # identify the usb device
             dev = usb.core.find(idVendor=0x16c0, idProduct=0x5dc)
@@ -178,7 +215,7 @@ class DecibelVisualizer(object):
             return float('{0:.2f}'.format(
                     float(random.randrange(lower_bound, upper_bound))))
 
-    def draw_frame(self, title="Live Decibel Reading", unit='dB'):
+    def draw_frame(self):
         """Draw the frame and labels."""
         x1, y1 = 10, 10
         x2, y2 = 10, self.max_scale
@@ -186,52 +223,95 @@ class DecibelVisualizer(object):
         self.Canvas.create_line(x1, y1, x2, y2, x3, y3, fill='black')
 
     def draw_one_bar(self, bar_height=130, bar_width=20, left_edge=20):
-        """Draw a single bar (for testing purposes)."""
-        inc_height = 0
-        for tot in range(0, int(bar_height) / 10 + 1):
-            # bin_height = min([10, bar_height - ((bar_height / 10) * 10)])
-            dif = bar_height - (tot * 10)
-            bin_height = min([dif, 10])
-            col = self.colors[tot]
-            x1, y1 = left_edge, self.max_scale - ((tot * 10) + bin_height)
-            x2, y2 = left_edge + bar_width, self.max_scale - (tot * 10)
+        """Draw a single bar composed of colored bins.
 
-            # print 'x1: {}, x2: {}, y1: {}, y2: {}, col: {}, tot:{}, ' \
-            #       'inc_height: {}, bar_height: {}'.format(
-            #           x1, x2, y1, y2, col, tot, inc_height, bar_height)
+           Parameters
+           ----------
+             bar_height (float, int) : height of the bar in pixels
+             bar_width (int) : width of the bar in pixels
+             left_edge (int) : horizontal position of the bar's left edge,
+               in pixels
+        """
+        # incremental height -- a bar is built up bin by bin
+        inc_height = 0
+        for i in range(0, int(bar_height) / 10 + 1):
+            # the topmost bin will often be shorter than the usual bin height
+            dif = bar_height - (i * 10)
+            bin_height = min([dif, 10])
+            col = self.colors[i]
+            # define the top-left and bottom right corners of the bin
+            x1, y1 = left_edge, self.max_scale - ((i * 10) + bin_height)
+            x2, y2 = left_edge + bar_width, self.max_scale - (i * 10)
 
             inc_height += bin_height
             if inc_height > bar_height:
                 break
 
+            # draw a single bin
             self.Canvas.create_rectangle(x1, y1, x2, y2, fill=col)
 
     def draw_multiple_bars(self, list_of_height_edge_tuples):
+        """Draw multiple, potentially different, bars at once.
+
+           Parameters
+           ----------
+             list_of_height_edge_tuples (list) : list of 2-tuples, e.g.:
+                 [(105, 20), (115, 50), (125, 80)]
+               Each tuple represents one bar. The first entry in the tuple
+               (int) is the bar's height, while the second (int) is the
+               horizontal position of the bar's left edge.
+        """
         for h, e in list_of_height_edge_tuples:
                 self.draw_one_bar(bar_height=h, left_edge=e)
 
     def draw_identical_bars(self, bar_height):
+        """Draw ten bars with identical heights.
+
+           Parameters
+           ----------
+             bar_height (float, int) : height of the bars
+        """
         self.draw_multiple_bars(
             [(bar_height, e) for e in [20+i*30 for i in range(0,10)]])
 
     def draw_interpolated_individual_bars(self, subcounter=None):
+        """Draw ten bars which show smooth transitions between values.
+
+           Parameters
+           ----------
+             subcounter (int) : number of transitional points to be
+               generated between pairs of measurements
+        """
         if subcounter is None:
             subcounter = self.subcounter
+        # create a list of tuples representing all measurement pairs
+        # e.g. [0, 1, 2, 3] --> [(0, 1), (1, 2), (2, 3)]
         tup_list = [(self.all_dbs[i][1], self.all_dbs[i+1][1])
                     for i in range(len(self.all_dbs) - 1)]
+        # create a new list with finer-grained intervals by interpolating
+        # between each measurement pair in tup_list
         int_list = []
         for a, b in tup_list:
             vals = self.interpolate_two_values(a, b)
             int_list += vals
-        # number of bars
+        # number of bars to be drawn (ten is default)
         num = 10
+        # the zip here joins a list of ten heights to a list of ten edges
         self.draw_multiple_bars(
             [(v, e) for (v, e) in zip(
                 int_list[-(num + subcounter):],
                 [20+i*30 for i in range(0, 10)])])
 
     def interpolate_two_values(self, val_a, val_b, subintervals=None):
-        """Return a list of values between two values"""
+        """Return a list of values evenly spaced between two values.
+
+           Parameters
+           ----------
+             val_a (float, int) : older measurement
+             val_b (float, int) : more recent measurement
+             subintervals (int) : number of transitional points to be
+               generated between the pair of measurements
+        """
         if subintervals is None:
             subintervals = self.subintervals
         interval = val_b - val_a
@@ -239,27 +319,26 @@ class DecibelVisualizer(object):
         return [val_a + (increment * s) for s in range(0, subintervals)]
 
     def live_display(self, subintervals=None):
-        """Monitor live decibel readings and plot with smoothness."""
-        # if counter % subintervals == 0
-        # then fetch a new data point
-        # else interpolate the last two
+        """Monitor live decibel readings and plot with smoothness.
+
+           Parameters
+           ----------
+             subintervals (int) : number of transitional points to be
+               generated between each pair of measurements
+        """
         # TODO: make sure this SAVES the db readings as they happen
         if subintervals is None:
             subintervals = self.subintervals
         delay = self.delay / subintervals
         unix_time = int(time.time())
         if len(self.all_dbs) >= 2:
-            # heights = self.interpolate_two_values(
-            #         val_a=self.all_dbs[-2][1],
-            #         val_b=self.all_dbs[-1][1],
-            #         subintervals=subintervals)
-
+            # the USB meter's refresh rate and the subcounter are in sync
             self.subcounter = self.counter % subintervals
-
+            # clear the canvas before drawing any new bars
             self.clear()
-            # self.draw_identical_bars(bar_height=heights[subcounter])
             self.draw_interpolated_individual_bars()
 
+            # if subcounter is zero, it's time to read the meter
             if self.subcounter == 0:
                 self.all_dbs.append((unix_time, self.live_dbs()))
                 self.update_stats()
@@ -285,67 +364,20 @@ class DecibelVisualizer(object):
         self.avg_value.update(self.db_average)
         self.max_value.update(self.db_maximum)
 
-    def db_values(self, subintervals=None):
-        """Parse a new decibel reading and smooth the visualization."""
-        if subintervals is None:
-            subintervals = self.subintervals
-        unix_time = int(time.time())
-        self.db_current = self.live_dbs()
-        save_reading(db=self.db_current, timestamp=unix_time)
-        self.all_dbs.append((unix_time, self.db_current))
-        print "before if loop"
-        if len(self.all_dbs) >= 2:
-            print "in if loop"
-            db_prev = self.all_dbs[-2][1]
-            db_now = self.all_dbs[-1][1]
-            db_int = db_now - db_prev
-            db_inc = db_int / float(subintervals)
-            print "db_prev: {}, db_now: {}, db_int: {}, db_inc: {}" \
-                    "".format(
-                    db_prev, db_now, db_int, db_inc)
-            # smooth the visualization display
-            for i in range(0, subintervals):
-                h = db_prev + (i * db_inc)
-                print 'i: {}, h: {}, p: {}'.format(i, h, db_prev+(i*db_inc))
-                self.draw_identical_bars(bar_height=h)
-                d = self.delay / subintervals
-                self.clear()
-                self.draw_identical_bars(h)
-                self.Canvas.after(d, self.draw_identical_bars, h)
-
-            # update labels
-            temp_average = sum(
-                [e[1] for e in self.all_dbs]) / float(len(self.all_dbs))
-            self.db_average = float('{0:.2f}'.format(temp_average))
-            self.db_maximum = max(self.db_current, self.db_maximum)
-            self.cur_value.update(self.db_current)
-            self.avg_value.update(self.db_average)
-            self.max_value.update(self.db_maximum)
-
-        else:
-            print "in else block"
-            pass
-
-        # call this function recursively if desired
-        if self.event:
-            print "in recursive block!"
-            self.Canvas.after(0, self.db_values)
-
     def start_live_db_reading(self, ms_between_readings=None):
         """Start live tracking and outputting of decibel readings."""
         if ms_between_readings is None:
             ms_between_readings = self.delay
         self.event = 'something'
-        # self.db_values()
         self.live_display()
 
     def clear(self):
-        """Remove existing bars from the visualizer"""
+        """Remove existing bars from the visualizer and redraw the frame."""
         self.Canvas.delete('all')
         self.draw_frame()
 
     def stop_reading(self, write_results=True, filename='totalresults'):
-        """Stop tracking decibel input."""
+        """Stop tracking decibel input and save all results."""
         self.event = None
         if write_results == True:
             file_number_in_use = True
@@ -370,6 +402,7 @@ def main():
     root.geometry('550x330+30+30')
     g = DecibelVisualizer(root)
     g.draw_frame()
+    # have the app open with some nice-looking bars on the screen
     g.draw_multiple_bars(
         [(105, 20), (115, 50), (125, 80), (121, 110), (120, 140),
          (119, 170), (118, 200), (115, 230), (112, 260), (108, 290)]
