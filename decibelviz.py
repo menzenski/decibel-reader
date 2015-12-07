@@ -8,11 +8,12 @@ import json
 import math
 import os
 import random
+import sys
 import time
 import Tkinter
 import usb.core
 
-from ftpconfig import FTP_URL, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
+from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
 
 def fibonacci_number(n):
     """Return the Nth Fibonacci number."""
@@ -21,31 +22,53 @@ def fibonacci_number(n):
         a, b = b, a + b
     return a
 
-def save_reading(db, timestamp, filename='kudecibels', filetype='json'):
-    """Write the current decibel reading (and a timestamp) to disk.
+class FTPConnection(object):
+    """FTP connection for uploading files."""
 
-       Parameters
-       ----------
-         db (float) : decibel reading
-         timestamp (int) : Unix timestamp
-         filename (string) : name of the file (not including extension)
-         filetype (string) : extension with which the file will be saved
-           (currently supports only XML and JSON, but others can be added.)
-    """
-    if filetype.lower() == 'xml':
-        filename = filename + '.xml'
-        message = ("""<?xml version="1.0"?>\n<output>\n\t"""
-            """<decibel-entry timestamp="{}">{}</decibel-entry>\n"""
-            """</output>""")
-        with open(filename, 'w+') as output:
-            output.write(message.format(timestamp, db))
-    elif filetype.lower() == 'json':
-        filename = filename + '.json'
-        message = """[\n   [{}, {}]\n]"""
-        with open(filename, 'w+') as output:
-            output.write(message.format(timestamp, db))
-    else:
-        pass
+    def __init__(self, host, user, password, directory):
+        """Initialize the FTP connection object.
+
+           Parameters
+           ----------
+             host (str) :
+             user (str) :
+             password (str) :
+        """
+        self.host = host
+        self.user = user
+        self.password = password
+        self.directory = directory
+
+    def __enter__(self):
+        # called at the beginning of a 'with' block
+        self.ftp = ftplib.FTP(self.host)
+        self.ftp.login(self.user, self.password)
+        # self.ftp.set_pasv(False)
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        # called at the end of a 'with' block
+        try:
+            self.ftp.quit()
+        # if there's no connection to close, don't do anything
+        except AttributeError:
+            pass
+
+    def send_file(self, filename, ext='.json', directory=None):
+        """Upload a plain text file to the specified FTP directory.
+
+           Parameters
+           ----------
+             directory (str) :
+             filename (str) :
+             ext (str) :
+             directory (str) :
+        """
+        if directory is None:
+            directory = self.directory
+        self.ftp.cwd(directory)
+        fname = filename + ext
+        return self.ftp.storlines('STOR {}'.format(fname), open(fname, 'r'))
 
 class ReadoutHeading(object):
     """Display a description of some measurement."""
@@ -93,8 +116,9 @@ class DecibelVisualizer(object):
 
     def __init__(self, parent, width=320, height=150, min_db=30, max_db=130,
                  delay=500, subintervals=10, title="Live Decibel Reading",
-                 units='dB', use_ftp=False, ftp_url='', ftp_username='',
-                 ftp_password='', ftp_dir=''):
+                 units='dB', use_ftp=False, ftp_host='', ftp_username='',
+                 ftp_password='', ftp_dir='', fname_send='kudbs',
+                 fname_save='totalresults', seconds_between_uploads=15):
         """Initialize the DecibelVizualizer widget.
 
            Parameters
@@ -112,10 +136,16 @@ class DecibelVisualizer(object):
              title (str) : title displayed at the top of the main window
              units (str) : units of measurement for the meter readings
              use_ftp (boolean) : should readings be sent to FTP server?
-             ftp_url (str) : hostname for FTP server
+             ftp_host (str) : hostname for FTP server
              ftp_username (str) : username for FTP server
              ftp_password (str) : password for FTP server
              ftp_dir (str) : path to desired directory on FTP server
+             fname_send (str) : filename for sending live readings via FTP
+               while the script is running
+             fname_save (str) : filename for saving all results locally
+               when script is stopped
+             seconds_between_uploads (int) : seconds between each attempt
+               to send data to the FTP server
         """
         self.parent = parent
         self.parent.wm_title(title)
@@ -129,23 +159,31 @@ class DecibelVisualizer(object):
         self.db_current = min_db
         self.db_maximum = min_db
         self.all_dbs = []
+        self.temp_dbs = []
         # live decibel tracking won't happen while self.event is None
         self.event = None
         # delay between readings of the USB device, in milliseconds
         self.delay = delay
         # number of times per second that the visualization will refresh
         self.subintervals = subintervals
+        self.seconds_between_uploads = seconds_between_uploads
+
+        # filename for the JSON to be sent via FTP
+        self.fname_send = fname_send
+        # filename for the JSON to be saved locally with all results
+        self.fname_save = fname_save
 
         # ftp login credentials
         self.use_ftp = use_ftp
-        self.ftp_url = ftp_url
+        self.ftp_host = ftp_host
         self.ftp_username = ftp_username
         self.ftp_password = ftp_password
         self.ftp_dir = ftp_dir
 
-        if self.use_ftp == True:
-            self._open_ftp_connection(self.ftp_url, self.username,
-                                      self.ftp_password, self.ftp_dir)
+        # if self.use_ftp == True:
+        #    self.ftp_connection = FTPConnection(
+        #             self.ftp_host, self.ftp_username, self.ftp_password,
+        #             self.ftp_dir)
 
         self.colors = {
             13: '#E50000',
@@ -167,6 +205,7 @@ class DecibelVisualizer(object):
         # counters
         self.counter = 0
         self.subcounter = 0
+        self.ftpcounter = 0
         self.fibcounter = 1
 
         # set up the labels and headings
@@ -209,30 +248,49 @@ class DecibelVisualizer(object):
         self.demo_button.grid(row=3, column=0, padx=10, pady=5)
         self.start_button.grid(row=2, column=0, padx=10, pady=5)
 
-    def _open_ftp_connection(self, host, username, password, directory):
-        """Establish a new connection to the FTP server.
-
-           Parameters
-           ----------
-             host (str) : hostname for FTP server
-             username (str) : username for FTP server
-             password (str) : password for the FTP server
-             directory (str) : path to desired directory on FTP server
-        """
+    def _send_file_via_ftp(self, fname, ext='.json'):
+        """Try to send a file to the FTP server."""
+        ftp_conn = FTPConnection(self.ftp_host, self.ftp_username,
+                                 self.ftp_password, self.ftp_dir)
+        # ideally data is sent every 15 seconds
+        standard_wait = self.seconds_between_uploads
         try:
-            self.ftp = ftplib.FTP(host=host, user=username, passwd=password)
-            self.ftp.cwd(directory)
-        except Exception as e:
-            print 'Exception: {}'.format(e)
-            self.use_ftp = False
+            with ftp_conn as ftp:
+                cmd = ftp.send_file(filename=fname)
+            # confirm successful upload and delete temp file
+            if cmd == '226 Transfer complete.':
+                print 'Successful upload! {}'.formad(cmd)
+                self.temp_dbs = []
+                self.fibcounter = 1
+                self.ftpcounter = 0
+        # if we get an error, keep trying
+        except:
+            print 'Unexpected error: {}'.format(sys.exc_info()[0])
+            wait = (standard_wait + fibonacci_number(self.fibcounter)) * 1000
+            self.Canvas.after(wait, self._send_file_via_ftp, fname)
+            self.fibcounter += 1
 
-    def _close_ftp_connection(self):
-        """Close the FTP connection."""
-        try:
-            self.ftp.quit()
-        # if there's no connection to close, don't do anything
-        except AttributeError as e:
-            pass
+    def save_json(self, obj, filename='results', overwrite=False):
+        """Save an object to file in JSON format."""
+        # convert a single reading to a list
+        if isinstance(obj, tuple):
+            obj = [obj]
+        if overwrite == False:
+            file_number_in_use = True
+            idx = 1
+            while file_number_in_use:
+                str_idx = str(idx).rjust(2, '0')
+                fname = '{}_{}'.format(filename, str_idx)
+                if os.path.isfile(fname + '.json'):
+                    idx += 1
+                else:
+                    filename = fname
+                    break
+        # the overwritten file should be as small as possible for FTP
+        indent = 3 if overwrite == False else None
+        json_output = json.dumps(obj, indent=indent, separators=(',', ':'))
+        with open(filename + '.json', 'w+') as stream:
+            stream.write(json_output)
 
     def live_dbs(self, lower_bound=None, upper_bound=None):
         """Return the live decibel reading from the USB device.
@@ -373,6 +431,19 @@ class DecibelVisualizer(object):
         increment = interval / float(subintervals)
         return [val_a + (increment * s) for s in range(0, subintervals)]
 
+    def fetch_new_reading(self):
+        """Get a new reading from the decibel meter."""
+        new = (int(time.time()), self.live_dbs())
+        self.all_dbs.append(new)
+        self.temp_dbs.append(new)
+        self.ftpcounter += 1
+        self.save_json(self.temp_dbs, filename=self.fname_send,
+                       overwrite=True)
+        if self.use_ftp == True:
+            if self.ftpcounter % self.seconds_between_uploads == 0:
+                self._send_file_via_ftp(fname=self.fname_send)
+        self.update_stats()
+
     def live_display(self, subintervals=None):
         """Monitor live decibel readings and plot with smoothness.
 
@@ -381,11 +452,9 @@ class DecibelVisualizer(object):
              subintervals (int) : number of transitional points to be
                generated between each pair of measurements
         """
-        # TODO: make sure this SAVES the db readings as they happen
         if subintervals is None:
             subintervals = self.subintervals
         delay = self.delay / subintervals
-        unix_time = int(time.time())
         if len(self.all_dbs) >= 2:
             # the USB meter's refresh rate and the subcounter are in sync
             self.subcounter = self.counter % subintervals
@@ -395,14 +464,12 @@ class DecibelVisualizer(object):
 
             # if subcounter is zero, it's time to read the meter
             if self.subcounter == 0:
-                self.all_dbs.append((unix_time, self.live_dbs()))
-                self.update_stats()
+                self.fetch_new_reading()
                 self.counter += 1
             else:
                 self.counter += 1
         else:
-            self.all_dbs.append((unix_time, self.live_dbs()))
-            self.update_stats()
+            self.fetch_new_reading()
             self.counter += 1
         # call this function recursively, if desired
         if self.event:
@@ -431,32 +498,20 @@ class DecibelVisualizer(object):
         self.Canvas.delete('all')
         self.draw_frame()
 
-    def stop_reading(self, write_results=True, filename='totalresults'):
+    def stop_reading(self, filename=None):
         """Stop tracking decibel input and save all results."""
+        if filename is None:
+            filename = self.fname_save
+        self.use_ftp = False
         self.event = None
-        self._close_ftp_connection()
-        if write_results == True:
-            file_number_in_use = True
-            idx = 1
-            while file_number_in_use:
-                str_idx = str(idx).rjust(2, '0')
-                fname = '{}_{}'.format(filename, str_idx)
-                if os.path.isfile(fname + '.json'):
-                    idx += 1
-                else:
-                    filename = fname
-                    break
-
-            json_output = json.dumps(self.all_dbs, indent=3,
-                                     separators=(',', ':'))
-            filename = filename + '.json'
-            with open(filename, 'w+') as stream:
-                stream.write(json_output)
+        self.save_json(obj=self.all_dbs, filename=filename, overwrite=False)
 
 def main():
     root = Tkinter.Tk()
     root.geometry('550x330+30+30')
-    g = DecibelVisualizer(root)
+    g = DecibelVisualizer(
+            root, use_ftp=True, ftp_host=FTP_HOST, ftp_username=FTP_USERNAME,
+            ftp_password=FTP_PASSWORD, ftp_dir=FTP_DIR)
     g.draw_frame()
     # have the app open with some nice-looking bars on the screen
     g.draw_multiple_bars(

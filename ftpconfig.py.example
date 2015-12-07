@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-FTP_URL = 'ftp.example.com'
+FTP_HOST = 'ftp.example.com'
 FTP_USERNAME = 'username'
 FTP_PASSWORD = 'password'
 FTP_DIR = 'subdirectory'
