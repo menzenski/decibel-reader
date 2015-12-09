@@ -30,9 +30,10 @@ class FTPConnection(object):
 
            Parameters
            ----------
-             host (str) :
-             user (str) :
-             password (str) :
+             host (str) : FTP hostname
+             user (str) : FTP username
+             password (str) : FTP password
+             directory (str) : desired FTP subdirectory
         """
         self.host = host
         self.user = user
@@ -59,10 +60,9 @@ class FTPConnection(object):
 
            Parameters
            ----------
-             directory (str) :
-             filename (str) :
-             ext (str) :
-             directory (str) :
+             filename (str) : file name, minus extension
+             ext (str) : file extension
+             directory (str) : destination subdirectory
         """
         if directory is None:
             directory = self.directory
@@ -249,7 +249,13 @@ class DecibelVisualizer(object):
         self.start_button.grid(row=2, column=0, padx=10, pady=5)
 
     def _send_file_via_ftp(self, fname, ext='.json'):
-        """Try to send a file to the FTP server."""
+        """Try to send a file to the FTP server.
+
+           Parameters
+           ----------
+             fname (str) : file name, minus extension
+             ext (str) : file extension
+        """
         ftp_conn = FTPConnection(self.ftp_host, self.ftp_username,
                                  self.ftp_password, self.ftp_dir)
         # ideally data is sent every 15 seconds
@@ -511,9 +517,14 @@ class DecibelVisualizer(object):
 def main():
     root = Tkinter.Tk()
     root.geometry('550x330+30+30')
-    g = DecibelVisualizer(
-            root, use_ftp=True, ftp_host=FTP_HOST, ftp_username=FTP_USERNAME,
-            ftp_password=FTP_PASSWORD, ftp_dir=FTP_DIR)
+    if len(sys.argv) == 2:
+        if sys.argv[1] == '--ftp':
+            g = DecibelVisualizer(
+                    root, use_ftp=True, ftp_host=FTP_HOST,
+                    ftp_username=FTP_USERNAME, ftp_password=FTP_PASSWORD,
+                    ftp_dir=FTP_DIR)
+    else:
+        g = DecibelVisualizer(root, use_ftp=False)
     g.draw_frame()
     # have the app open with some nice-looking bars on the screen
     g.draw_multiple_bars(
