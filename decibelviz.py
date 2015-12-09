@@ -13,7 +13,11 @@ import time
 import Tkinter
 import usb.core
 
-from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
+try:
+    from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
+except ImportError:
+    print "FTP configuration import failed. Saving output locally only."
+    pass
 
 def fibonacci_number(n):
     """Return the Nth Fibonacci number."""
@@ -223,12 +227,17 @@ class DecibelVisualizer(object):
         self.close_button = Tkinter.Button(
                 parent, text='Stop', font=('Helvetica', '30'),
                 command=self.stop_reading)
+        """Stop reading and displaying dB values and save all readings."""
+
         self.demo_button = Tkinter.Button(
                 parent, text='Demo', font=('Helvetica', '30'),
                 command=self.live_display)
+        """Display one new data point."""
+
         self.start_button = Tkinter.Button(
                 parent, text='Start', font=('Helvetica', '30'),
                 command=self.start_live_db_reading)
+        """Start reading and displaying dB values."""
 
         # configure the parent widget's grid
         parent.grid_columnconfigure(0, weight=1)
@@ -516,7 +525,7 @@ class DecibelVisualizer(object):
 
 def main():
     root = Tkinter.Tk()
-    root.geometry('550x330+30+30')
+    root.geometry('570x330+30+30')
     if len(sys.argv) == 2:
         if sys.argv[1] == '--ftp':
             g = DecibelVisualizer(
