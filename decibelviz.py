@@ -21,7 +21,7 @@ except ImportError:
 def fibonacci_number(n):
     """Return the Nth Fibonacci number."""
     a, b = 1, 1
-    for _ in range(n - 1):
+    for _ in xrange(n - 1):
         a, b = b, a + b
     return a
 
