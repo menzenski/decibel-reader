@@ -17,7 +17,6 @@ try:
     from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
 except ImportError:
     print "FTP configuration import failed. Saving output locally only."
-    pass
 
 def fibonacci_number(n):
     """Return the Nth Fibonacci number."""
