@@ -291,10 +291,9 @@ class DecibelVisualizer(object):
         # convert a single reading to a list
         if isinstance(obj, tuple):
             obj = [obj]
-        if overwrite == False:
-            file_number_in_use = True
+        if not overwrite:
             idx = 1
-            while file_number_in_use:
+            while True:
                 str_idx = str(idx).rjust(2, '0')
                 fname = '{}_{}'.format(filename, str_idx)
                 if os.path.isfile(fname + '.json'):
@@ -303,7 +302,7 @@ class DecibelVisualizer(object):
                     filename = fname
                     break
         # the overwritten file should be as small as possible for FTP
-        indent = 3 if overwrite == False else None
+        indent = 3 if not overwrite else None
         json_output = json.dumps(obj, indent=indent, separators=(',', ':'))
         with open(filename + '.json', 'w+') as stream:
             stream.write(json_output)
