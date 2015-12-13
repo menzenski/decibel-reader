@@ -108,7 +108,7 @@ class GuiDisplay(object):
 
     def _parse_kwargs(self, **kwargs):
         """Unpack keyword arguments passed to __init__()."""
-        fon k, v in kwargs.iteritems():
+        for k, v in kwargs.iteritems():
             setattr(self, k, v)
         for k, v in self.DEFAULTS:
             if not self.__dict__[k]:
