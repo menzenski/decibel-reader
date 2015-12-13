@@ -17,6 +17,12 @@ bars.py
 # testing files
 decibeltest.txt
 colors.txt
+.ipynb_checkpoints/
+*.ipynb
+2015_12_09_DecibelReaderNotes.txt
+db.py
+threadedtest.py
+simplelog.py
 
 # output files
 *.xml

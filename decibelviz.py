@@ -3,6 +3,11 @@
 
 """Display current decibel readings with a graphical gauge."""
 
+# XXXX: include timestamps in milliseconds
+# TODO: (interpolated) data points at 15 samples/second
+# XXXX: send most recent 300 samples at a time
+# TODO: upload to FTP once per second
+
 import ftplib
 import json
 import math
@@ -12,6 +17,12 @@ import sys
 import time
 import Tkinter
 import usb.core
+
+try:
+    import cStringIO as StringIO
+except ImportError:
+    import StringIO
+    print "Using non-C implementation of StringIO."
 
 try:
     from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
@@ -57,6 +68,24 @@ class FTPConnection(object):
         # if there's no connection to close, don't do anything
         except AttributeError:
             pass
+
+    def send_json_string(self, filename, input_obj, directory=None):
+        """Send a filelike object to an FTP directory.
+
+           Parameters
+           ----------
+             filename (str) : file name, minus extension
+             json_string (str) : string containing JSON data
+             directory (str) : destination subdirectory
+        """
+        if directory is None:
+            directory = self.directory
+        obj = [obj] if isinstance(obj, tuple) else obj
+        json_string = json.dumps(obj, indent=None, separators=(',', ':'))
+        file_string = StringIO.StringIO(json_string)
+        self.ftp.cwd(directory)
+        print '{}'.format(json_string)
+        self.ftp.storbinary('STOR {}.json'.format(filename), file_string)
 
     def send_file(self, filename, ext='.json', directory=None):
         """Upload a plain text file to the specified FTP directory.
@@ -118,10 +147,10 @@ class DecibelVisualizer(object):
     """Cool-looking way to visualize decibel levels."""
 
     def __init__(self, parent, width=320, height=150, min_db=30, max_db=130,
-                 delay=500, subintervals=10, title="Live Decibel Reading",
+                 delay=1000, subintervals=15, title="Live Decibel Reading",
                  units='dB', use_ftp=False, ftp_host='', ftp_username='',
-                 ftp_password='', ftp_dir='', fname_send='kudbs',
-                 fname_save='totalresults', seconds_between_uploads=15):
+                 ftp_password='', ftp_dir='', fname_send='kubbdbs',
+                 fname_save='totalresults', seconds_between_uploads=1):
         """Initialize the DecibelVizualizer widget.
 
            Parameters
@@ -162,6 +191,7 @@ class DecibelVisualizer(object):
         self.db_current = min_db
         self.db_maximum = min_db
         self.all_dbs = []
+        self.to_send = []
         self.temp_dbs = []
         # live decibel tracking won't happen while self.event is None
         self.event = None
@@ -256,6 +286,56 @@ class DecibelVisualizer(object):
         self.demo_button.grid(row=3, column=0, padx=10, pady=5)
         self.start_button.grid(row=2, column=0, padx=10, pady=5)
 
+    def _config_parent():
+        """Configure the parent object."""
+        pass
+
+    def _config_grid():
+        """Configure the layout of widgets and subwidgets."""
+        pass
+
+    def _config_labels():
+        """Configure all labels."""
+        pass
+
+    def _config_buttons():
+        """Configure all buttons."""
+        pass
+
+    def _send_json_obj_via_ftp(self, input_obj, fname=None):
+        """Send a file-like object containing JSON data to an FTP server.
+
+           Parameters
+           ----------
+             fname (str) : file name, minus extension
+             json_string (str) : string containing JSON data
+        """
+        if fname is None:
+            fname = '{}STR'.format(self.fname_send)
+        ftp_conn = FTPConnection(self.ftp_host, self.ftp_username,
+                                 self.ftp_password, self.ftp_dir)
+        # ideally data is sent every 15 seconds
+        standard_wait = self.seconds_between_uploads
+        try:
+            with ftp_conn as ftp:
+                cmd = ftp.send_json_string(filename=fname,
+                                           input_obj=input_obj)
+                # confirm successful upload
+            if cmd == '226 Transfer complete.':
+                print 'Successful StringIO upload! {}'.format(cmd)
+                #self.temp_dbs = []
+                #if len(self.temp_dbs) > 300:
+                #    self.temp_dbs = self.temp_dbs
+                self.fibcounter = 1
+                self.ftpcounter = 0
+        # if we get an error, keep trying:
+        except:
+            print "Unexpected Error: {}".format(sys.exc_info()[0])
+            wait = (standard_wait + fibonacci_number(self.fibcounter)) * 1000
+            self.Canvas.after(wait, self._send_json_obj_via_ftp,
+                              input_obj)
+            self.fibcounter += 1
+
     def _send_file_via_ftp(self, fname, ext='.json'):
         """Try to send a file to the FTP server.
 
@@ -273,8 +353,9 @@ class DecibelVisualizer(object):
                 cmd = ftp.send_file(filename=fname)
             # confirm successful upload and delete temp file
             if cmd == '226 Transfer complete.':
-                print 'Successful upload! {}'.format(cmd)
-                self.temp_dbs = []
+                print 'Successful File upload at {}! {}'.format(
+                        time.strftime("%H:%M:%S"), cmd)
+                #self.temp_dbs = []
                 self.fibcounter = 1
                 self.ftpcounter = 0
         # if we get an error, keep trying
@@ -286,11 +367,13 @@ class DecibelVisualizer(object):
             self.Canvas.after(wait, self._send_file_via_ftp, fname)
             self.fibcounter += 1
 
-    def save_json(self, obj, filename='results', overwrite=False):
+    def save_json(self, obj, filename=None, overwrite=False):
         """Save an object to file in JSON format."""
         # convert a single reading to a list
         if isinstance(obj, tuple):
             obj = [obj]
+        if filename is None:
+            filename = self.fname_save
         if not overwrite:
             idx = 1
             while True:
@@ -309,6 +392,9 @@ class DecibelVisualizer(object):
 
     def live_dbs(self, lower_bound=None, upper_bound=None):
         """Return the live decibel reading from the USB device.
+
+           Credit for decoding the WENSN WS1361 Sound Meter belongs to
+           Troy Simpson: http://opensource.ebswift.com/RaspiMonitor/wensn/
 
            Parameters
            ----------
@@ -335,7 +421,7 @@ class DecibelVisualizer(object):
             db_as_string = '{0:.2f}'.format(float(db))
             return float(db_as_string)
         # allow a demo mode in case the demo mode isn't connected.
-        except ValueError:
+        except AttributeError:
             return float('{0:.2f}'.format(
                     float(random.randrange(lower_bound, upper_bound))))
         except Exception as e:
@@ -446,13 +532,41 @@ class DecibelVisualizer(object):
         increment = interval / float(subintervals)
         return [val_a + (increment * s) for s in range(0, subintervals)]
 
-    def fetch_new_reading(self):
+    def fetch_new_reading_and_send_string(self):
         """Get a new reading from the decibel meter."""
-        new = (int(time.time()), self.live_dbs())
+        # Unix timestamp in milliseconds
+        unix_time = int(round(time.time() * 1000))
+        new = (unix_time, self.live_dbs())
         self.all_dbs.append(new)
         self.temp_dbs.append(new)
         self.ftpcounter += 1
-        self.save_json(self.temp_dbs, filename=self.fname_send,
+        if self.use_ftp == True:
+            if self.ftpcounter % self.seconds_between_uploads == 0:
+                #data_to_send = self.all_dbs[-300:] if len(
+                #        self.all_dbs) >= 300 else self.all_dbs
+                data_to_send = self.temp_dbs
+                self._send_json_obj_via_ftp(input_obj=data_to_send)
+        self.update_stats()
+
+    def fetch_new_reading(self):
+        """Get a new reading from the decibel meter."""
+        # Unix timestamp in milliseconds
+        unix_time = int(round(time.time() * 1000))
+        new = (unix_time, self.live_dbs())
+        self.all_dbs.append(new)
+        self.temp_dbs.append(new)
+        self.ftpcounter += 1
+
+        if len(self.temp_dbs) > 300:
+            json_data = self.temp_dbs[-300:]
+        else:
+            json_data = self.temp_dbs
+
+        # if len(self.all_dbs) >= 300:
+        #    self.save_json(self.all_dbs, self.fname_save)
+        #    self.all_dbs = []
+
+        self.save_json(json_data, filename=self.fname_send,
                        overwrite=True)
         if self.use_ftp == True:
             if self.ftpcounter % self.seconds_between_uploads == 0:
@@ -480,11 +594,13 @@ class DecibelVisualizer(object):
             # if subcounter is zero, it's time to read the meter
             if self.subcounter == 0:
                 self.fetch_new_reading()
+                # self.fetch_new_reading_and_send_string()
                 self.counter += 1
             else:
                 self.counter += 1
         else:
             self.fetch_new_reading()
+            # self.fetch_new_reading_and_send_string()
             self.counter += 1
         # call this function recursively, if desired
         if self.event:
