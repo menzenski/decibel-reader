@@ -90,12 +90,10 @@ class FTPUploader(object):
 class GuiDisplay(object):
     """Visualize live sound level data."""
 
-    DEFAULTS = {
-        'width': 320,
-        'height': 150,
-        'title': 'Live Decibel Reading',
-        'units': 'dB',
-        }
+    width = 320
+    height = 150
+    title = 'Live Decibel Reading'
+    units = 'dB'
 
     def __init__(self, **kwargs):
         """Initialize the DecibelVisualizer object.
@@ -104,14 +102,8 @@ class GuiDisplay(object):
            ----------
              **kwargs
         """
-        self._parse_kwargs(kwargs)
-
-    def _parse_kwargs(self, **kwargs):
-        """Unpack keyword arguments passed to __init__()."""
-        for k, v in kwargs.iteritems():
-            setattr(self, k, v)
-        for k, v in self.DEFAULTS:
-            if not self.__dict__[k]:
+        if kwargs:
+            for k, v in kwargs.iteritems():
                 setattr(self, k, v)
 
 class DecibelReaderMainApp(object):
