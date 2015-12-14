@@ -12,7 +12,11 @@
 # don't write temp files: send as cStringIO.StringIO() instead
 # (don't forget to close them, though!)
 
+from __future__ import print_function, division
+
+import bisect
 import ftplib
+import itertools
 import json
 import math
 import os
@@ -28,12 +32,60 @@ try:
     import cStringIO as StringIO
 except ImportError:
     import StringIO
-    print "Using non-C implementation of StringIO."
+    print("Using non-C implementation of StringIO.")
 
-try:
-    from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
-except ImportError:
-    print "FTP configuration import failed."
+#try:
+#    from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
+#except ImportError:
+#    print("FTP configuration import failed.")
+
+def interpolate_two_numbers(earlier, later, subintervals=10):
+    """Return a list of values evenly spaced between two values.
+
+       Parameters
+       ----------
+         earlier (float, int) : the older of the two values
+         later (float, int) : the more recent of the two values
+         subintervals (int) : number of transitional points to be
+           generated between the pair of values
+    """
+    interval = later - earlier
+    increment = interval / subintervals
+    return (earlier + (increment * s) for s in xrange(0, subintervals))
+
+def interpolate_two_tuples(older, newer, subintervals=10):
+    """Interpolate between two tuples."""
+    return itertools.izip(interpolate_two_numbers(older[0], newer[0]),
+                          interpolate_two_numbers(older[1], newer[1]))
+
+class Interpolator(object):
+    """Produces smoother data from infrequently collected values."""
+
+    def __init__(self, list_of_tuples):
+        """Initialize the Interpolator object.
+
+           Parameters
+           ----------
+             list_of_tuples (list) : list in which each entry is a 2-tuple,
+               in which the first entry is a Unix timestamp in milliseconds
+               and the second entry is a decibel reading, e.g.:
+                   [(1449936195326, 114.0), (1449936195534, 53.0)]
+        """
+        self.time_list = map(float, [i[0] for i in list_of_tuples])
+        self.db_list = map(float, [i[1] for i in list_of_tuples])
+
+        if any([t2 - t1 <= 0 for t1, t2 in zip(
+                self.time_list, self.time_list[1:])]):
+            raise ValueError("Times must be in strictly ascending order.")
+
+        intervals = zip(self.time_list, self.time_list[1:],
+                        self.db_list, self.db_list[1:])
+        self.slopes = [(d2 - d1)/(t2 - t1) for t1, t2, d1, d2 in intervals]
+
+    def __getitem__(self, t):
+        """Return the interpolated y value for a given x value."""
+        i = bisect.bisect_left(self.time_list, t) - 1
+        return self.db_list[i] + self.slopes[i] * (t - self.time_list[i])
 
 class DBMeterReader(object):
     """Decibel Meter Reader."""
@@ -41,16 +93,21 @@ class DBMeterReader(object):
     MIN_DB = 30
     MAX_DB = 130
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, queue, **kwargs):
         """Initialize the DBMeterReader object.
 
            Parameters
            ----------
-             arg (type) :
+             queue (Queue.Queue) : queue to which new decibel readings
+               will be added
         """
         pass
 
     def new_reading(self):
+        """Return a 2-tuple consisting of a Unix timestamp and dB value."""
+        return int(time.time() * 1000), self._db_value()
+
+    def _db_value(self):
         """Get the current decibel reading.
 
            Returns
@@ -71,14 +128,14 @@ class DBMeterReader(object):
             return float(db_as_string)
         # allow a demo mode in case the usb sound level meter isn't connected
         except Exception as e:
-            print '{}: {}'.format(e.__doc__, e.message)
+            print('{}: {}'.format(e.__doc__, e.message))
             return float('{0:.2f}'.format(float(random.randrange(
                 self.MIN_DB, self.MAX_DB))))
 
 class FTPUploader(object):
     """FTP connection with associated methods."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         """Initialize the FTPUploader object.
 
            Parameters
@@ -87,6 +144,47 @@ class FTPUploader(object):
         """
         pass
 
+class ReadoutHeading(object):
+    """Display a description of some measurement."""
+
+    def __init__(self, parent, text):
+        """Initialize the ReadoutHeading object.
+
+           Parameters
+           ----------
+             parent (Tkinter widget) : the parent widget
+             text (str) : text for the label
+        """
+        self.Label = Tkinter.Label(parent, text=text)
+
+class ReadoutValue(object):
+    """Display a measurement in units."""
+
+    def __init__(self, parent, value, fontsize=60, units='dB'):
+        """Initialize the ReadoutValue object.
+
+           Parameters
+           ----------
+             parent (Tkinter widget) : the parent widget
+             value (str) : starting text for the label
+             fontsize (int) : font size for the label
+             units (str) : units of measurement for the value displayed
+        """
+        self.text = Tkinter.StringVar()
+        self.Label = Tkinter.Label(parent, textvariable=self.text,
+                                   font=('Helvetica', '{}'.format(fontsize)))
+        self.units = units
+        self.update(value)
+
+    def update(self, db):
+        """Update the readout with a new value.
+
+           Parameters
+           ----------
+             db (float, int) : decibel value to be displayed
+        """
+        self.text.set('{} {}'.format(db, self.units))
+
 class GuiDisplay(object):
     """Visualize live sound level data."""
 
@@ -94,29 +192,174 @@ class GuiDisplay(object):
     height = 150
     title = 'Live Decibel Reading'
     units = 'dB'
+    min_db = 30
+    max_db = 130
+    colors = {
+        13: '#E50000',
+        12: '#E14400',
+        11: '#DD8700',
+        10: '#D9C701',
+        9:  '#A7D501',
+        8:  '#65D201',
+        7:  '#25CE02',
+        6:  '#02CA1C',
+        5:  '#02C658',
+        4:  '#03C391',
+        3:  '#03B6BF',
+        2:  '#037ABB',
+        1:  '#0341B7',
+        0:  '#040AB4',
+        }
 
-    def __init__(self, **kwargs):
-        """Initialize the DecibelVisualizer object.
+    def __init__(self, parent, **kwargs):
+        """Initialize the DecibelVisualizer object and parse any keyword
+           arguments..
 
            Parameters
            ----------
+             parent (Tkinter widget) : the parent widget
              **kwargs
         """
+        self.parent = parent
         if kwargs:
             for k, v in kwargs.iteritems():
                 setattr(self, k, v)
+        # construct the GUI window and its parts
+        self._configure_window()
+        self._configure_labels()
+        self._configure_buttons()
+        self._configure_grid()
+        self._draw_opening_bars()
+
+    def _configure_window(self):
+        """Configure window geometry."""
+        self.parent.wm_title(self.title)
+        self.Canvas = Tkinter.Canvas(self.parent, width=self.width,
+                                     height=self.height)
+
+    def _configure_labels(self):
+        """Configure labels and text."""
+        self.cur_heading = ReadoutHeading(
+                self.parent, text="Current Decibel Reading:")
+        self.cur_value = ReadoutValue(self.parent, value=self.min_db)
+
+        self.avg_heading = ReadoutHeading(
+                self.parent, text="Today's Average:")
+        self.avg_value = ReadoutValue(
+                self.parent, value=self.min_db, fontsize=44)
+
+        self.max_heading = ReadoutHeading(
+                self.parent, text="Today's Maximum:")
+        self.max_value = ReadoutValue(
+                self.parent, value=self.min_db, fontsize=44)
+
+    def _configure_buttons(self):
+        """Configure buttons."""
+        self.close_button = Tkinter.Button(
+                self.parent, text='Stop', font=('Helvetica', '30'),
+                #command=self.stop_reading
+                )
+        self.demo_button = Tkinter.Button(
+                self.parent, text='Demo', font=('Helvetica', '30'))
+        self.start_button = Tkinter.Button(
+                self.parent, text='Start', font=('Helvetica', '30'),
+                #command=self.start_live_db_reading
+                )
+
+    def _configure_grid(self):
+        """Arrange subwidgets on the parent's grid."""
+        # weight columns
+        self.parent.grid_columnconfigure(0, weight=1)
+        self.parent.grid_columnconfigure(1, weight=1)
+
+        # add the canvas to the parent widget's grid
+        self.Canvas.grid(row=2, column=1, columnspan=3, rowspan=3)
+
+        # add labels and headings
+        self.cur_heading.Label.grid(
+                row=0, column=0, columnspan=2, padx=10, pady=10)
+        self.cur_value.Label.grid(row=1, column=0, pady=5)
+
+        self.avg_heading.Label.grid(row=0, column=2, padx=10, pady=5)
+        self.avg_value.Label.grid(row=0, column=3, pady=5)
+
+        self.max_heading.Label.grid(row=1, column=2, padx=10, pady=5)
+        self.max_value.Label.grid(row=1, column=3, pady=5)
+
+        # add buttons
+        self.close_button.grid(row=4, column=0, padx=10, pady=5)
+        self.demo_button.grid(row=3, column=0, padx=10, pady=5)
+        self.start_button.grid(row=2, column=0, padx=10, pady=5)
+
+    def _draw_opening_bars(self):
+        """Draw some meaningless bars when the GuiDisplay is started."""
+        self.draw_frame()
+        list_of_bars = [
+            (105, 20), (115, 50), (125, 80), (121, 110), (120, 140),
+            (119, 170), (118, 200), (115, 230), (112, 260), (108, 290)]
+        for h, e in list_of_bars:
+            self.draw_one_bar(bar_height=h, left_edge=e)
+
+    def draw_frame(self):
+        """Draw the frame for the decibel visualization."""
+        x1, y1 = 10, 10
+        x2, y2 = 10, self.max_db + 10
+        x3, y3 = self.width, self.max_db + 10
+        self.Canvas.create_line(x1, y1, x2, y2, x3, y3, fill='black')
+
+    def clear_bars(self):
+        """Remove existing bars from the visualizer and redraw the frame."""
+        self.Canvas.delete('all')
+        self.draw_frame()
+
+    def draw_one_bar(self, bar_height=130, bar_width=20, left_edge=20):
+        """Draw a single bar composed of colored bins.
+
+           Parameters
+           ----------
+             bar_height (float, int) : height of the bar, in pixels
+             bar_width (int) : width of the bar, in pixels
+             left_edge (int) : horizontal position of the bar's leftmost
+               edge, in pixels
+        """
+        # incremental height -- a bar is built up bin by bin
+        inc_height = 0
+        for i in range(0, int(bar_height) // 10 + 1):
+            # the topmost bin will often be shorter than the usual bar height
+            dif = bar_height - (i * 10)
+            bin_height = min([dif, 10])
+            col = self.colors[i]
+            # a bin is a rectangle defined by top-left and bottom-right pts
+            x1, y1 = left_edge, (self.max_db + 10) - ((i * 10) + bin_height)
+            x2, y2 = left_edge + bar_width, (self.max_db + 10) - (i * 10)
+
+            inc_height += bin_height
+            if inc_height > bar_height:
+                break
+
+            # draw one bin
+            self.Canvas.create_rectangle(x1, y1, x2, y2, fill=col)
 
 class DecibelReaderMainApp(object):
     """docstring for DecibelReaderMainApp"""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         """Initialize the DecibelReaderMainApp object.
 
            Parameters
            ----------
              arg (type) :
         """
-        self.gui = GuiDisplay()
+        self.root = Tkinter.Tk()
+        self.gui = GuiDisplay(parent=self.root)
+
+        self._configure_queues()
+
+    def _configure_queues(self):
+        """Configure the Queues for data input and data output."""
+        self.raw_db_queue = Queue.Queue()
+        self.smoothed_db_queue = Queue.Queue()
+        self.ftp_queue = Queue.Queue()
 
     def read_input(self):
         """Handle the thread for incoming decibel data."""
@@ -127,7 +370,8 @@ class DecibelReaderMainApp(object):
         pass
 
 def main():
-    pass
+    app = DecibelReaderMainApp()
+    app.root.mainloop()
 
 if __name__ == '__main__':
     main()
