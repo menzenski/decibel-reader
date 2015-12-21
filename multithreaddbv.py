@@ -14,7 +14,6 @@
 
 from __future__ import print_function, division
 
-import bisect
 import ftplib
 import itertools
 import json
@@ -34,10 +33,10 @@ except ImportError:
     import StringIO
     print("Using non-C implementation of StringIO.")
 
-#try:
-#    from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
-#except ImportError:
-#    print("FTP configuration import failed.")
+try:
+    from ftpconfig import FTP_HOST, FTP_USERNAME, FTP_PASSWORD, FTP_DIR
+except ImportError:
+    print("FTP configuration import failed.")
 
 def interpolate_two_numbers(earlier, later, subintervals=10):
     """Return a list of values evenly spaced between two values.
@@ -58,34 +57,34 @@ def interpolate_two_tuples(older, newer, subintervals=10):
     return itertools.izip(interpolate_two_numbers(older[0], newer[0]),
                           interpolate_two_numbers(older[1], newer[1]))
 
-class Interpolator(object):
-    """Produces smoother data from infrequently collected values."""
+class DecibelDataObject(object):
+    """File-like object containing decibel data for FTP uploading."""
 
     def __init__(self, list_of_tuples):
-        """Initialize the Interpolator object.
+        """Initialize the DecibelDataObject object.
 
            Parameters
            ----------
-             list_of_tuples (list) : list in which each entry is a 2-tuple,
-               in which the first entry is a Unix timestamp in milliseconds
-               and the second entry is a decibel reading, e.g.:
-                   [(1449936195326, 114.0), (1449936195534, 53.0)]
+             list_of_tuples (list) : list of 2-tuples, each of which contains
+               a Unix timestamp in milliseconds in the first position and a
+               decibel reading in the second position.
         """
-        self.time_list = map(float, [i[0] for i in list_of_tuples])
-        self.db_list = map(float, [i[1] for i in list_of_tuples])
+        self.tups = list_of_tuples
 
-        if any([t2 - t1 <= 0 for t1, t2 in zip(
-                self.time_list, self.time_list[1:])]):
-            raise ValueError("Times must be in strictly ascending order.")
+    def __enter__(self):
+        # open the context manager
+        json_string = json.dumps(self.tups, indent=None
+                                 separators=(',', ':'))
+        self.file_like_obj = StringIO.StringIO(json_string)
+        return self
 
-        intervals = zip(self.time_list, self.time_list[1:],
-                        self.db_list, self.db_list[1:])
-        self.slopes = [(d2 - d1)/(t2 - t1) for t1, t2, d1, d2 in intervals]
-
-    def __getitem__(self, t):
-        """Return the interpolated y value for a given x value."""
-        i = bisect.bisect_left(self.time_list, t) - 1
-        return self.db_list[i] + self.slopes[i] * (t - self.time_list[i])
+    def __exit__(self):
+        # close the context manager
+        try:
+            self.file_like_obj.close()
+        except Exception:
+            # if it's not open, don't do anything
+            pass
 
 class DBMeterReader(object):
     """Decibel Meter Reader."""
@@ -101,11 +100,20 @@ class DBMeterReader(object):
              queue (Queue.Queue) : queue to which new decibel readings
                will be added
         """
-        pass
+        self.queue = queue
+        self.temp = []
+
+    def _put(self, tup):
+        """Put a 2-tuple into the queue."""
+        self.queue.put(tup)
+
+    def produce_data(self):
+        self._put(self.new_reading())
 
     def new_reading(self):
-        """Return a 2-tuple consisting of a Unix timestamp and dB value."""
-        return int(time.time() * 1000), self._db_value()
+        """Put a 2-tuple---a Unix timestamp and a dB value---in the queue."""
+        reading = int(time.time() * 1000), self._db_value()
+        return reading
 
     def _db_value(self):
         """Get the current decibel reading.
@@ -128,21 +136,49 @@ class DBMeterReader(object):
             return float(db_as_string)
         # allow a demo mode in case the usb sound level meter isn't connected
         except Exception as e:
-            print('{}: {}'.format(e.__doc__, e.message))
+            # print('{}: {}'.format(e.__doc__, e.message))
             return float('{0:.2f}'.format(float(random.randrange(
                 self.MIN_DB, self.MAX_DB))))
 
 class FTPUploader(object):
     """FTP connection with associated methods."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, host, user, password, directory='/', **kwargs):
         """Initialize the FTPUploader object.
 
            Parameters
            ----------
-             arg (type) :
+             host (str) : FTP hostname
+             user (str) : FTP username
+             password (str) : FTP password
+             directory (str) : desired FTP subdirectory
         """
-        pass
+        self.host = host
+        self.user = user
+        self.password = password
+        self.directory = directory
+
+    def __enter__(self):
+        """dostring"""
+        self.ftp = ftplib.FTP(self.host)
+        self.ftp.login(self.user, self.password)
+        return self
+
+    def __exit__(self):
+        """docstring"""
+        try:
+            self.ftp.quit()
+        # if there's no connection to close, we don't need to do anything
+        except AttributeError:
+            pass
+
+    def upload_filelike_obj(self, obj, filename, directory=None):
+        """Upload a filelike object to an FTP directory."""
+        if directory is None:
+            directory = self.directory
+        # TODO: Flesh out this function
+        # TODO: Add a separate class for the json string, which has a
+        # `.as_stringio()` method which returns a cStringIO.StringIO object.
 
 class ReadoutHeading(object):
     """Display a description of some measurement."""
@@ -194,6 +230,14 @@ class GuiDisplay(object):
     units = 'dB'
     min_db = 30
     max_db = 130
+    db_average = 30
+    db_maximum = 30
+    seen = 0
+    total = 0
+    window_width = 650
+    window_height = 330
+    x_pos = 30
+    y_pos = 30
     colors = {
         13: '#E50000',
         12: '#E14400',
@@ -211,28 +255,35 @@ class GuiDisplay(object):
         0:  '#040AB4',
         }
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, queue, start_command, stop_command, **kwargs):
         """Initialize the DecibelVisualizer object and parse any keyword
            arguments..
 
            Parameters
            ----------
              parent (Tkinter widget) : the parent widget
+             queue (Queue.Queue) : queue from which incoming data is read
+             start_command (function) : function which begins data reading
+             stop_command (function) : function which stops data reading
              **kwargs
         """
         self.parent = parent
+        self.queue = queue
+        self.temp = []
         if kwargs:
             for k, v in kwargs.iteritems():
                 setattr(self, k, v)
         # construct the GUI window and its parts
         self._configure_window()
         self._configure_labels()
-        self._configure_buttons()
+        self._configure_buttons(start=start_command, stop=stop_command)
         self._configure_grid()
         self._draw_opening_bars()
 
     def _configure_window(self):
         """Configure window geometry."""
+        self.parent.geometry('{}x{}+{}+{}'.format(
+            self.window_width, self.window_height, self.x_pos, self.y_pos))
         self.parent.wm_title(self.title)
         self.Canvas = Tkinter.Canvas(self.parent, width=self.width,
                                      height=self.height)
@@ -253,23 +304,29 @@ class GuiDisplay(object):
         self.max_value = ReadoutValue(
                 self.parent, value=self.min_db, fontsize=44)
 
-    def _configure_buttons(self):
-        """Configure buttons."""
+    def _configure_buttons(self, start, stop):
+        """Configure buttons.
+
+           Parameters
+           ----------
+             start (function) : function which starts data reading
+             stop (function) : function which stops data reading
+        """
         self.close_button = Tkinter.Button(
                 self.parent, text='Stop', font=('Helvetica', '30'),
-                #command=self.stop_reading
+                command=stop
                 )
         self.demo_button = Tkinter.Button(
                 self.parent, text='Demo', font=('Helvetica', '30'))
         self.start_button = Tkinter.Button(
                 self.parent, text='Start', font=('Helvetica', '30'),
-                #command=self.start_live_db_reading
+                command=start
                 )
 
     def _configure_grid(self):
         """Arrange subwidgets on the parent's grid."""
         # weight columns
-        self.parent.grid_columnconfigure(0, weight=1)
+        self.parent.grid_columnconfigure(0, weight=1, minsize=300)
         self.parent.grid_columnconfigure(1, weight=1)
 
         # add the canvas to the parent widget's grid
@@ -340,6 +397,51 @@ class GuiDisplay(object):
             # draw one bin
             self.Canvas.create_rectangle(x1, y1, x2, y2, fill=col)
 
+    def draw_multiple_bars(self, list_of_heights):
+        """Draw multiple bars at once, from right to left.
+
+           Parameters
+           ----------
+             list_of_heights (list) :
+        """
+        bars = zip(list_of_heights[::-1], [20+i*30 for i in range(9, -1, -1)])
+        for (height, edge) in bars:
+            self.draw_one_bar(bar_height=height, left_edge=edge)
+
+    def process_incoming(self):
+        """Handle data in the incoming queue."""
+        while self.queue.qsize():
+            try:
+                # get most recent time and db reading (a 2-tuple)
+                t, db = self.queue.get(0)
+                print(t, db)
+                self.add_to_temp(db)
+                self.update_stats(db)
+                self.clear_bars()
+                self.draw_multiple_bars(self.temp)
+                #self.draw_one_bar(bar_height=db)
+            except Queue.Empty:
+                pass
+
+    def update_stats(self, db):
+        """Update labels with new information."""
+        # recalculate average and maximum
+        self.seen += 1
+        self.total += db
+        self.db_average = float('{0:.2f}'.format(self.total / self.seen))
+        self.db_maximum = max(self.db_maximum, db)
+        # update labels
+        self.cur_value.update(db)
+        self.avg_value.update(self.db_average)
+        self.max_value.update(self.db_maximum)
+
+    def add_to_temp(self, db):
+        """Return self.temp with a new value, limited to length 10."""
+        self.temp.append(db)
+        if len(self.temp) >= 10:
+            self.temp = self.temp[-10:]
+        return self.temp
+
 class DecibelReaderMainApp(object):
     """docstring for DecibelReaderMainApp"""
 
@@ -351,19 +453,52 @@ class DecibelReaderMainApp(object):
              arg (type) :
         """
         self.root = Tkinter.Tk()
-        self.gui = GuiDisplay(parent=self.root)
-
         self._configure_queues()
+        #self.running = True
+
+        self.gui = GuiDisplay(parent=self.root, queue=self.raw_db_queue,
+                              start_command=self._start,
+                              stop_command=self._shutdown)
+
+        # set up threads and start them
+        #self._configure_threads()
+        # start checking the queue for new data
+        #self._periodic_call()
 
     def _configure_queues(self):
         """Configure the Queues for data input and data output."""
         self.raw_db_queue = Queue.Queue()
-        self.smoothed_db_queue = Queue.Queue()
-        self.ftp_queue = Queue.Queue()
+        #self.smoothed_db_queue = Queue.Queue()
+        #self.ftp_queue = Queue.Queue()
 
-    def read_input(self):
-        """Handle the thread for incoming decibel data."""
-        pass
+    def _configure_threads(self):
+        """Configure the threads used for input and output."""
+        self.db_thread = threading.Thread(target=self.get_dbs)
+        self.db_thread.start()
+
+    def _periodic_call(self):
+        """Check every 100ms if there is something new in the queue."""
+        self.gui.process_incoming()
+        if not self.running:
+            sys.exit(1)
+        self.root.after(125, self._periodic_call)
+
+    def _start(self):
+        """Start running the app."""
+        self.running = 1
+        self._configure_threads()
+        self._periodic_call()
+
+    def _shutdown(self):
+        """Safely stop all running processes."""
+        self.running = 0
+
+    def get_dbs(self):
+        """Fetch time/decibel readings and add to Queue."""
+        while self.running:
+            self.DBReader = DBMeterReader(queue=self.raw_db_queue)
+            self.DBReader.produce_data()
+            time.sleep(1)
 
     def send_output(self):
         """Handle the thread for sending decibel data via FTP."""
